@@ -17,7 +17,9 @@ The user gives a prompt. If it's missing, ask for it.
 
 2. Check the server: `curl -s -m 3 http://127.0.0.1:8188/system_stats`. If it doesn't answer, start it in a Terminal panel tab titled "ComfyUI server" with `& "$HOME\ComfyUI\venv\Scripts\python.exe" "$HOME\ComfyUI\main.py" --port 8188`, writing the home folder out in full, and wait for it to answer.
 
-3. Show the settings and time with `--estimate`, then run the same command without it, using the Bash tool with `run_in_background`:
+3. If the user gave no reference video and isn't editing a clip, search with the `reference-video` skill and suggest up to three usable clips with their links. Let them pick one or go without. Don't download one until they pick.
+
+4. Show the settings and time with `--estimate`, then run the same command without it, using the Bash tool with `run_in_background`:
 
    ```bash
    "$HOME/ComfyUI/venv/Scripts/python.exe" "$HOME/.claude/skills/rework-video/generate_video.py" "<prompt>" --preset balanced --fps 48 --camera tracking --shot full-body
@@ -34,7 +36,7 @@ The user gives a prompt. If it's missing, ask for it.
    | `--lighting`, `--style` | Free text |
    | `--seconds`, `--width`, `--height`, `--steps`, `--model` | Override the preset. Width and height must be multiples of 16 |
 
-4. The last line of output lists the result under `"11"`: the file is `$HOME/ComfyUI/output/<subfolder>/<filename>`. Send it with SendUserFile and say how long it took. If the script exits with an error, tell the user what it said.
+5. The last line of output lists the result under `"11"`: the file is `$HOME/ComfyUI/output/<subfolder>/<filename>`. Send it with SendUserFile and say how long it took. If the script exits with an error, tell the user what it said.
 
 ## Sessions and subjects
 

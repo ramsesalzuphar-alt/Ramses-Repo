@@ -8,7 +8,10 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from yt_dlp.utils import DownloadError
+
 import generate_video as g
+import reference_video
 
 HOST, PORT = "127.0.0.1", 8190
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -87,6 +90,17 @@ class Handler(BaseHTTPRequestHandler):
                 with open(JOB_LOG, encoding="utf-8", errors="replace") as f:
                     text = f.read()[-6000:]
             return self.respond({"running": job_running(), "code": None if job is None else job.poll(), "log": text})
+        if url.path == "/api/suggest":
+            query = urllib.parse.parse_qs(url.query).get("q", [""])[0].strip()
+            if not query:
+                return self.respond({"error": "Enter a prompt first"}, 400)
+            try:
+                results = reference_video.search(" ".join(query.split()[:12]), 12)
+            except (DownloadError, SystemExit) as error:
+                return self.respond({"error": f"Search failed: {error}"}, 502)
+            # very short or long results are rarely usable motion references
+            usable = [v for v in results if 5 <= (v.get("duration") or 0) <= 600][:6]
+            return self.respond([{"id": v["id"], "title": v.get("title"), "duration": v.get("duration"), "uploader": v.get("channel") or v.get("uploader")} for v in usable])
         if url.path.startswith("/video/"):
             return self.send_video(urllib.parse.unquote(url.path[7:]))
         return self.respond({"error": "Not found"}, 404)
@@ -138,6 +152,20 @@ class Handler(BaseHTTPRequestHandler):
             job = subprocess.Popen(build_command(form), stdout=log, stderr=subprocess.STDOUT, cwd=HERE, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             log.close()
             return self.respond({"started": True})
+        if url.path == "/api/use-reference":
+            video_id = str(form.get("id") or "")
+            # only YouTube's own 11-character ids, so this can't be pointed at other addresses
+            if not re.fullmatch(r"[\w-]{11}", video_id):
+                return self.respond({"error": "Bad video id"}, 400)
+            try:
+                start, seconds = float(form.get("start") or 0), float(form.get("seconds") or 2) + 1
+                if start < 0 or not 0 < seconds <= reference_video.MAX_SECONDS:
+                    return self.respond({"error": "Check the start time and length"}, 400)
+                return self.respond({"path": reference_video.get(f"https://www.youtube.com/watch?v={video_id}", start, seconds)})
+            except ValueError:
+                return self.respond({"error": "Check the start time and length"}, 400)
+            except (DownloadError, SystemExit) as error:
+                return self.respond({"error": f"Download failed: {error}"}, 502)
         if url.path == "/api/stop":
             if job_running():
                 job.terminate()

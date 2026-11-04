@@ -38,6 +38,13 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); bor
 .memory ul { padding-left: 18px; margin: 6px 0; }
 .memory button { padding: 1px 7px; font-size: 12px; margin-left: 5px; }
 .error { color: var(--bad); }
+.suggestions { display: grid; gap: 8px; margin: 8px 0; }
+.suggestion { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.suggestion img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; display: block; }
+.suggestion strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+.suggestion span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; overflow-wrap: anywhere; }
+.suggestion a { color: var(--accent); font-size: 13px; margin-left: 8px; }
+.suggestion button { padding: 4px 9px; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -101,8 +108,17 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); bor
     <label class="check"><input type="checkbox" name="auto_reference"> Find a YouTube reference automatically</label>
     <p class="hint">Downloading may break the site's terms, and clips stay their owners' copyright. Automatic picks are often poor matches, so keep results private.</p>
 
+    <div id="suggestBox" hidden>
+      <h2>Suggested references</h2>
+      <p class="hint">Pick one to guide the motion, or press Generate to go without one. Watch it first, as suggestions can be poor matches.</p>
+      <label>Start the clip at, in seconds <input id="refStart" type="number" min="0" step="1" value="0"></label>
+      <div class="suggestions" id="suggestions"></div>
+    </div>
+    <p class="hint" id="chosen" hidden></p>
+
     <div class="row">
       <button class="primary" type="submit" id="go">Generate</button>
+      <button type="button" id="suggest">Suggest references</button>
       <button type="button" id="estimate">Check time</button>
       <button type="button" id="stop" disabled>Stop</button>
     </div>
@@ -140,6 +156,84 @@ const upload = async file => {
   return data.path;
 };
 
+let chosenReference = null;
+let suggestedFor = null;
+
+function hasReference() {
+  return chosenReference || form.elements.video_file.files.length || form.elements.auto_reference.checked || form.elements.edit_latest.checked;
+}
+
+async function showSuggestions() {
+  const prompt = form.elements.prompt.value.trim();
+  const box = document.getElementById('suggestBox');
+  const list = document.getElementById('suggestions');
+  logBox.classList.remove('error');
+  logBox.textContent = 'Finding references...';
+  suggestedFor = prompt;
+  try {
+    const results = await api('/api/suggest?q=' + encodeURIComponent(prompt));
+    list.replaceChildren(...results.map(suggestionCard));
+    box.hidden = false;
+    logBox.textContent = results.length ? 'Pick a reference, or press Generate to go without one.' : 'No usable references found. Press Generate to go without one.';
+  } catch (error) {
+    logBox.textContent = error.message + ' Press Generate to go without one.';
+    logBox.classList.add('error');
+  }
+}
+
+function suggestionCard(video) {
+  const card = document.createElement('div');
+  card.className = 'suggestion';
+  const image = document.createElement('img');
+  image.src = `https://i.ytimg.com/vi/${encodeURIComponent(video.id)}/mqdefault.jpg`;
+  image.alt = '';
+  image.loading = 'lazy';
+  const text = document.createElement('div');
+  const title = document.createElement('strong');
+  title.textContent = video.title;
+  const details = document.createElement('span');
+  details.textContent = `${video.duration}s${video.uploader ? ', ' + video.uploader : ''}`;
+  const use = document.createElement('button');
+  use.type = 'button';
+  use.textContent = 'Use this';
+  use.setAttribute('aria-label', 'Use ' + video.title);
+  use.onclick = () => chooseReference(video, use);
+  const watch = document.createElement('a');
+  watch.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(video.id);
+  watch.target = '_blank';
+  watch.rel = 'noopener';
+  watch.textContent = 'Watch';
+  text.append(title, details, use, watch);
+  card.append(image, text);
+  return card;
+}
+
+async function chooseReference(video, button) {
+  button.disabled = true;
+  logBox.classList.remove('error');
+  logBox.textContent = 'Saving a short clip...';
+  try {
+    const result = await api('/api/use-reference', { id: video.id, start: document.getElementById('refStart').value, seconds: form.elements.seconds.value });
+    chosenReference = result.path;
+    const chosen = document.getElementById('chosen');
+    chosen.hidden = false;
+    chosen.textContent = `Reference: ${video.title}, from ${video.uploader || 'YouTube'}. It stays its owner's copyright, and downloading may break the site's terms, so keep results private.`;
+    document.getElementById('suggestBox').hidden = true;
+    logBox.textContent = 'Reference ready. Press Generate.';
+  } catch (error) {
+    button.disabled = false;
+    logBox.textContent = error.message;
+    logBox.classList.add('error');
+  }
+}
+
+function clearReference() {
+  chosenReference = null;
+  suggestedFor = null;
+  document.getElementById('chosen').hidden = true;
+  document.getElementById('suggestBox').hidden = true;
+}
+
 async function collect() {
   const data = Object.fromEntries(new FormData(form));
   const body = {};
@@ -153,8 +247,9 @@ async function collect() {
   }
   const image = form.elements.animate_file.files[0];
   const video = form.elements.video_file.files[0];
+  if (chosenReference && !video) body.video = chosenReference;
   if (image) {
-    if (!video && !data.edit_latest && !data.auto_reference) throw new Error('A subject image also needs a motion video.');
+    if (!video && !chosenReference && !data.edit_latest && !data.auto_reference) throw new Error('A subject image also needs a motion video.');
     logBox.textContent = 'Uploading image...';
     body.animate = await upload(image);
   }
@@ -188,7 +283,7 @@ async function poll() {
     logBox.classList.toggle('error', !state.running && state.code);
     logBox.scrollTop = logBox.scrollHeight;
   }
-  if (wasRunning && !state.running) { loadClips(); loadSessions(); loadMemory(); }
+  if (wasRunning && !state.running) { loadClips(); loadSessions(); loadMemory(); clearReference(); }
   wasRunning = state.running;
   if (state.running) setTimeout(poll, 3000);
 }
@@ -242,7 +337,14 @@ async function loadMemory() {
     return item;
   }));
 }
-form.addEventListener('submit', event => { event.preventDefault(); start(false); });
+form.addEventListener('submit', event => {
+  event.preventDefault();
+  const prompt = form.elements.prompt.value.trim();
+  // offer references once per prompt; a second press means go without one
+  if (prompt && !hasReference() && suggestedFor !== prompt) return showSuggestions();
+  start(false);
+});
+document.getElementById('suggest').onclick = showSuggestions;
 document.getElementById('estimate').onclick = () => start(true);
 stop.onclick = () => api('/api/stop', {}).then(poll);
 form.elements.session.addEventListener('change', loadMemory);
