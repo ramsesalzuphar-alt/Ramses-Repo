@@ -1,0 +1,9 @@
+__pycache__/
+frames/
+*.log
+*.mp4
+*.safetensors
+*.gguf
+# one-off helpers with paths and sizes for a single download
+keep-awake.ps1
+progress.ps1
