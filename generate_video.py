@@ -63,6 +63,8 @@ BEST_PRESET = {"model": "5b", "width": 1280, "height": 704, "steps": 30, "crf": 
 FPS = 24
 # 14B is made for 16 fps; playing it at 24 makes everything move 1.5x too fast
 FPS_14B = 16
+# the distilled Animate model is built for this many steps
+ANIMATE_STEPS = 10
 NEGATIVE = (
     "blurry, low quality, distorted, deformed, extra limbs, extra fingers, bad anatomy, "
     "static, still frame, watermark, text, subtitles"
@@ -167,6 +169,46 @@ def use_video_input(workflow, filename, frames, fps, width, height, strength):
     workflow["10"]["inputs"]["fps"] = fps
 
 
+def build_animate_workflow(prompt, image, video, frames, fps, width, height, seed):
+    """Wan Animate 2 distilled, following ComfyUI's template, with the cache in RAM for small GPUs."""
+    scale = lambda source: {"class_type": "ImageScale", "inputs": {"image": source, "upscale_method": "area", "width": width, "height": height, "crop": "center"}}
+    encode = lambda text: {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": text}}
+    vision = lambda source: {"class_type": "CLIPVisionEncode", "inputs": {"clip_vision": ["6", 0], "image": source, "crop": "none"}}
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "wan_animate_2_distill_int8_convrot.safetensors", "weight_dtype": "default"}},
+        "2": {"class_type": "WanAnimate2Cache", "inputs": {"model": ["1", 0], "device": "cpu", "dtype": "int8"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan"}},
+        "4": encode(f"Character appearance description: {prompt}"),
+        "5": encode(NEGATIVE),
+        "6": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": "clip_vision_h.safetensors"}},
+        "7": {"class_type": "VAELoader", "inputs": {"vae_name": "Wan2_1_VAE_bf16.safetensors"}},
+        "8": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["2", 0], "shift": 5.0}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["24", 0], "vae": ["7", 0]}},
+        "10": {"class_type": "CreateVideo", "inputs": {"images": ["9", 0], "fps": fps}},
+        "11": {"class_type": "SaveVideo", "inputs": {"video": ["10", 0], "filename_prefix": "video/wan", "format": "auto", "format.codec": "auto"}},
+        "12": {"class_type": "LoadImage", "inputs": {"image": image}},
+        "13": scale(["12", 0]),
+        "14": {"class_type": "LoadVideo", "inputs": {"file": video}},
+        "15": {"class_type": "GetVideoComponents", "inputs": {"video": ["14", 0]}},
+        "16": {"class_type": "ImageFromBatch", "inputs": {"image": ["15", 0], "batch_index": 0, "length": frames}},
+        "17": scale(["16", 0]),
+        "18": vision(["13", 0]),
+        "19": {"class_type": "ImageFromBatch", "inputs": {"image": ["17", 0], "batch_index": 0, "length": 1}},
+        "20": vision(["19", 0]),
+        "21": encode(prompt),
+        "22": {"class_type": "WanAnimate2ToVideo", "inputs": {
+            "positive": ["4", 0], "negative": ["5", 0], "vae": ["7", 0], "width": width, "height": height, "length": frames, "batch_size": 1,
+            "video_frame_offset": 0, "pose_strength": 1.0, "pose_start_percent": 0.0, "pose_end_percent": 1.0, "reference_image_strength": 1.0,
+            "reference_image": ["13", 0], "pose_video": ["17", 0], "clip_vision_output": ["18", 0], "positive_pose": ["21", 0], "clip_vision_output_pose": ["20", 0]}},
+        "23": {"class_type": "SamplerCustom", "inputs": {
+            "model": ["8", 0], "add_noise": True, "noise_seed": seed, "cfg": 1.0, "positive": ["22", 0], "negative": ["22", 1],
+            "sampler": ["25", 0], "sigmas": ["26", 0], "latent_image": ["22", 2]}},
+        "24": {"class_type": "TrimVideoLatent", "inputs": {"samples": ["23", 0], "trim_amount": ["22", 3]}},
+        "25": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "lcm"}},
+        "26": {"class_type": "BasicScheduler", "inputs": {"model": ["2", 0], "scheduler": "simple", "steps": ANIMATE_STEPS, "denoise": 1.0}},
+    }
+
+
 def cinematography(args):
     parts = [CAMERA.get(args.camera), ANGLE.get(args.angle), SHOT.get(args.shot)]
     parts.append(f"shot on a {args.lens:g}mm lens" if args.lens else None)
@@ -198,16 +240,16 @@ def add_finishing(workflow, width, height, tiled, upscale, smooth, target_fps=No
         workflow["9"] = {"class_type": "VAEDecodeTiled", "inputs": {**decode, "tile_size": 512, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8}}
     if upscale:
         # RealESRGAN always gives 4x, which is too heavy to keep, so scale back to 2x
-        workflow["19"] = {"class_type": "UpscaleModelLoader", "inputs": {"model_name": "RealESRGAN_x4plus.safetensors"}}
-        workflow["20"] = {"class_type": "ImageUpscaleWithModel", "inputs": {"upscale_model": ["19", 0], "image": images}}
-        workflow["21"] = {"class_type": "ImageScale", "inputs": {"image": ["20", 0], "upscale_method": "lanczos", "width": width * 2, "height": height * 2, "crop": "disabled"}}
-        images = ["21", 0]
+        workflow["30"] = {"class_type": "UpscaleModelLoader", "inputs": {"model_name": "RealESRGAN_x4plus.safetensors"}}
+        workflow["31"] = {"class_type": "ImageUpscaleWithModel", "inputs": {"upscale_model": ["30", 0], "image": images}}
+        workflow["32"] = {"class_type": "ImageScale", "inputs": {"image": ["31", 0], "upscale_method": "lanczos", "width": width * 2, "height": height * 2, "crop": "disabled"}}
+        images = ["32", 0]
     if smooth:
-        workflow["22"] = {"class_type": "FrameInterpolationModelLoader", "inputs": {"model_name": "rife_v4.26.safetensors"}}
+        workflow["33"] = {"class_type": "FrameInterpolationModelLoader", "inputs": {"model_name": "rife_v4.26.safetensors"}}
         # aim for about 48 fps: 16 fps needs tripling, 24 fps doubling
         multiplier = max(2, round((target_fps or 48) / workflow["10"]["inputs"]["fps"]))
-        workflow["23"] = {"class_type": "FrameInterpolate", "inputs": {"interp_model": ["22", 0], "images": images, "multiplier": multiplier}}
-        images = ["23", 0]
+        workflow["34"] = {"class_type": "FrameInterpolate", "inputs": {"interp_model": ["33", 0], "images": images, "multiplier": multiplier}}
+        images = ["34", 0]
         workflow["10"]["inputs"]["fps"] *= multiplier
     workflow["10"]["inputs"]["images"] = images
 
@@ -290,6 +332,7 @@ def main():
     parser.add_argument("--crf", type=float, help="H.264 quality: lower is better and larger, 18 is very good")
     parser.add_argument("--video", help="existing clip to rework")
     parser.add_argument("--strength", type=float, default=0.6)
+    parser.add_argument("--animate", metavar="IMAGE", help="animate the subject in this image with the motion from --video, using Wan Animate")
     if "--best" in sys.argv:
         # as defaults, so any option typed explicitly still wins
         parser.set_defaults(**best_settings(load_history()))
@@ -299,8 +342,8 @@ def main():
         parser.set_defaults(**PRESETS[args.preset])
         args = parser.parse_args()
     if args.smooth is None:
-        # 14B is made at 16 fps, which looks choppy unless smoothed
-        args.smooth = args.model == "14b"
+        # 14B and Animate are made at 16 fps, which looks choppy unless smoothed
+        args.smooth = args.model == "14b" or bool(args.animate)
     if args.rate:
         return rate_clip(*args.rate)
     if args.history:
@@ -334,12 +377,24 @@ def main():
     if extras:
         args.prompt = f"{args.prompt}, {extras}"
     seed = args.seed if args.seed is not None else random.randrange(2**32)
-    workflow = build_workflow(args.prompt, args.width, args.height, args.seconds, args.steps, seed)
-    if args.model == "14b":
-        use_14b_model(workflow, args.width, args.height, args.seconds, args.steps, seed)
-    if args.video:
-        filename, frames, fps = prepare_video(args.video, args.seconds, FPS_14B if args.model == "14b" else FPS)
-        use_video_input(workflow, filename, frames, fps, args.width, args.height, args.strength)
+    if args.animate:
+        if not args.video:
+            sys.exit("--animate needs --video for the motion")
+        if not os.path.isfile(args.animate):
+            sys.exit(f"Image not found: {args.animate}")
+        image = os.path.basename(args.animate)
+        if os.path.abspath(args.animate) != os.path.abspath(os.path.join(COMFY_INPUT, image)):
+            shutil.copyfile(args.animate, os.path.join(COMFY_INPUT, image))
+        filename, frames, fps = prepare_video(args.video, args.seconds, FPS_14B)
+        args.model, args.steps = "animate", ANIMATE_STEPS
+        workflow = build_animate_workflow(args.prompt, image, filename, frames, fps, args.width, args.height, seed)
+    else:
+        workflow = build_workflow(args.prompt, args.width, args.height, args.seconds, args.steps, seed)
+        if args.model == "14b":
+            use_14b_model(workflow, args.width, args.height, args.seconds, args.steps, seed)
+        if args.video:
+            filename, frames, fps = prepare_video(args.video, args.seconds, FPS_14B if args.model == "14b" else FPS)
+            use_video_input(workflow, filename, frames, fps, args.width, args.height, args.strength)
     add_finishing(workflow, args.width, args.height, args.tiled, args.upscale, args.smooth, args.fps)
     final_fps = workflow["10"]["inputs"]["fps"]
     if args.fps and final_fps != args.fps:
