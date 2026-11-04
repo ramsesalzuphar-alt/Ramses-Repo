@@ -423,8 +423,11 @@ def main():
             session["memory"][f'edit {len(session["memory"])}'] = change
         elif args.prompt and not revise_file:
             session["memory"]["scene"] = args.prompt
-        # the scene reads best first, whatever order things were remembered in
         memory = session["memory"]
+        # saved like any other instruction, so later edits keep the same camera and look
+        if cinematography(args):
+            memory["camera and look"] = cinematography(args)
+        # the scene reads best first, whatever order things were remembered in
         args.prompt = ", ".join(value for _, value in sorted(memory.items(), key=lambda item: item[0] != "scene"))
     if args.auto_reference:
         if args.video:
@@ -438,7 +441,7 @@ def main():
     ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
 
     extras = cinematography(args)
-    if extras:
+    if extras and session is None:
         args.prompt = f"{args.prompt}, {extras}"
     seed = args.seed if args.seed is not None else random.randrange(2**32)
     if args.animate:

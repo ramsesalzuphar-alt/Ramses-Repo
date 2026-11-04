@@ -8,6 +8,10 @@ Double-click `Start Wan Studio.bat` to start ComfyUI and the page, then bookmark
 bookmark only works while they're running. The page has the prompt, your settings, uploads, past clips and ratings,
 with a tab for each session that keeps its own clips, edits and memory. All clips shows everything.
 
+Each session tab also has a chat, run by a small local model (`llama3.2` through Ollama, on the CPU so it doesn't
+take GPU memory). It turns your words into settings and asks about quality and frame rate. Code discards any setting
+you didn't mention, and only the form's Generate button starts a video.
+
 ## Keeping the subject intact
 
 `--animate IMAGE --video CLIP` animates the subject in the image with the motion from the clip, using the distilled

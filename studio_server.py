@@ -12,6 +12,7 @@ from yt_dlp.utils import DownloadError
 
 import generate_video as g
 import reference_video
+import studio_chat
 
 HOST, PORT = "127.0.0.1", 8190
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -168,6 +169,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond({"error": "Check the start time and length"}, 400)
             except (DownloadError, SystemExit) as error:
                 return self.respond({"error": f"Download failed: {error}"}, 502)
+        if url.path == "/api/chat":
+            name = str(form.get("session") or "")
+            if not re.fullmatch(r"[\w -]+", name):
+                return self.respond({"error": "Open a session tab to chat"}, 400)
+            try:
+                return self.respond(studio_chat.handle(name, form, bool(g.load_session(name)["clips"])))
+            except ValueError as error:
+                return self.respond({"error": str(error)}, 400)
+            except (OSError, KeyError, json.JSONDecodeError) as error:
+                return self.respond({"error": f"The local chat model didn't answer. Check that Ollama is running. ({error})"}, 503)
         if url.path == "/api/stop":
             if job_running():
                 job.terminate()

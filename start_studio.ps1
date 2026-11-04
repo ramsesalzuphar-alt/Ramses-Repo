@@ -7,6 +7,9 @@ function Test-Up($url) {
   try { Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2 | Out-Null; $true } catch { $false }
 }
 
+if (-not (Test-Up 'http://127.0.0.1:11434/api/version')) {
+  Start-Process -FilePath "$HOME\AppData\Local\Programs\Ollama\ollama.exe" -ArgumentList 'serve' -WindowStyle Hidden
+}
 if (-not (Test-Up 'http://127.0.0.1:8188/system_stats')) {
   Start-Process -FilePath $python -ArgumentList "`"$comfy\main.py`" --port 8188" -WorkingDirectory $comfy -WindowStyle Minimized
 }

@@ -41,6 +41,13 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); bor
 .tabs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
 .tabs button[aria-current] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 .tabs input { width: 180px; margin: 0; }
+.right { display: grid; gap: 20px; align-content: start; min-width: 0; }
+.messages { display: grid; gap: 8px; max-height: 320px; overflow-y: auto; margin-bottom: 10px; }
+.message { padding: 8px 10px; border-radius: 8px; max-width: 85%; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); }
+.message.user { justify-self: end; background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+#chatChoices p { margin: 0 0 6px; font-weight: 600; font-size: 14px; }
+#chatChoices .row { margin-bottom: 10px; }
+.chatForm input { flex: 1 1 200px; margin: 0; }
 .suggestions { display: grid; gap: 8px; margin: 8px 0; }
 .suggestion { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
 .suggestion img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; display: block; }
@@ -140,10 +147,24 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); bor
   </div>
 </section>
 
+<div class="right">
+<section>
+  <h2>Chat with the generator</h2>
+  <p class="hint" id="chatHint">Open or create a session tab to chat.</p>
+  <div id="chat" hidden>
+    <div class="messages" id="messages" aria-live="polite"></div>
+    <div id="chatChoices"></div>
+    <form class="row chatForm" id="chatForm">
+      <input id="chatInput" aria-label="Message the generator" placeholder="Make a 5 second video of..." maxlength="2000">
+      <button class="primary" type="submit" id="chatSend">Send</button>
+    </form>
+  </div>
+</section>
 <section>
   <h2 id="clipsTitle">All clips</h2>
   <div class="clips" id="clips"></div>
 </section>
+</div>
 </main>
 <script>
 const form = document.getElementById('form');
@@ -342,6 +363,98 @@ async function loadSessions() {
     return tab;
   }));
 }
+const describe = (draft, edit) => [
+  (edit ? 'Change: ' : 'Video: ') + draft.prompt,
+  ...['preset', 'fps', 'seconds', 'camera', 'angle', 'shot', 'lens', 'lighting', 'style'].filter(k => draft[k] !== undefined).map(k => `${k}: ${draft[k]}`),
+].join('\n');
+
+function renderChat(state) {
+  const list = document.getElementById('messages');
+  list.replaceChildren(...state.messages.map(message => {
+    const item = document.createElement('div');
+    item.className = 'message ' + message.role;
+    item.textContent = message.content;
+    return item;
+  }));
+  list.scrollTop = list.scrollHeight;
+  const choices = document.getElementById('chatChoices');
+  choices.replaceChildren();
+  for (const question of state.questions) {
+    const label = document.createElement('p');
+    label.textContent = question.question;
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.append(...question.options.map(option => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = option.label;
+      button.onclick = () => sendChat(question.field ? { answer: { field: question.field, value: option.value, label: option.label } } : { message: option.label });
+      return button;
+    }));
+    choices.append(label, row);
+  }
+  if (state.ready) {
+    const summary = document.createElement('pre');
+    summary.textContent = describe(state.draft, state.edit);
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'primary';
+    go.textContent = 'Use these settings';
+    go.onclick = () => useChatSettings(state);
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.append(go);
+    choices.append(summary, row);
+  }
+}
+
+async function sendChat(body) {
+  const session = form.elements.session.value;
+  const send = document.getElementById('chatSend');
+  send.disabled = true;
+  logBox.classList.remove('error');
+  if (body.message) logBox.textContent = 'The generator is thinking. This can take a minute on your laptop.';
+  try {
+    renderChat(await api('/api/chat', { session, ...body }));
+    if (body.message) logBox.textContent = 'Ready.';
+  } catch (error) {
+    logBox.textContent = error.message;
+    logBox.classList.add('error');
+  }
+  send.disabled = false;
+}
+
+function useChatSettings(state) {
+  for (const name of ['preset', 'fps', 'seconds', 'camera', 'angle', 'shot', 'lens', 'lighting', 'style']) {
+    const value = state.draft[name];
+    if (value !== undefined) form.elements[name].value = value;
+    else if (!['preset', 'fps', 'seconds'].includes(name)) form.elements[name].value = '';
+  }
+  form.elements.prompt.value = state.draft.prompt;
+  form.elements.edit_latest.checked = state.edit;
+  sendChat({ reset: true });
+  // the form's normal path, so references, uploads and the time check all still apply
+  logBox.textContent = 'Settings copied to the form. Add a subject image if you want one, then press Generate.';
+  logBox.classList.remove('error');
+  go.scrollIntoView({ block: 'center' });
+}
+
+async function loadChat() {
+  const session = form.elements.session.value;
+  document.getElementById('chat').hidden = !session;
+  document.getElementById('chatHint').hidden = !!session;
+  if (session) await sendChat({});
+}
+
+document.getElementById('chatForm').addEventListener('submit', event => {
+  event.preventDefault();
+  const input = document.getElementById('chatInput');
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = '';
+  sendChat({ message });
+});
+
 function openSession(name) {
   form.elements.session.value = name;
   // nothing typed or chosen in one session should carry into another
@@ -351,7 +464,7 @@ function openSession(name) {
   logBox.textContent = 'Ready.';
   logBox.classList.remove('error');
   try { localStorage.setItem('session', name); } catch {}
-  loadSessions(); loadClips(); loadMemory(); poll();
+  loadSessions(); loadClips(); loadMemory(); loadChat(); poll();
 }
 async function loadMemory() {
   const name = form.elements.session.value.trim();
