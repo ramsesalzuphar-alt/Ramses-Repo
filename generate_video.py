@@ -14,6 +14,7 @@ import ctypes
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,7 @@ SERVER = "http://127.0.0.1:8188"
 COMFY_INPUT = os.path.expanduser("~/ComfyUI/input")
 HISTORY = os.path.expanduser("~/ComfyUI/output/history.jsonl")
 OUTPUT_VIDEO = os.path.expanduser("~/ComfyUI/output/video")
+SESSIONS = os.path.expanduser("~/ComfyUI/output/sessions")
 SETTINGS = ("model", "width", "height", "steps", "crf", "tiled", "upscale", "smooth", "fps")
 PRESETS = {
     "draft": {"model": "5b", "width": 704, "height": 480, "steps": 20, "tiled": True},
@@ -254,6 +256,29 @@ def add_finishing(workflow, width, height, tiled, upscale, smooth, target_fps=No
     workflow["10"]["inputs"]["images"] = images
 
 
+def session_path(name):
+    if not re.fullmatch(r"[\w -]+", name):
+        sys.exit("Session names can only use letters, numbers, spaces, - and _")
+    return os.path.join(SESSIONS, name + ".json")
+
+
+def load_session(name):
+    path = session_path(name)
+    if not os.path.exists(path):
+        return {"memory": {}, "clips": []}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_session(name, session):
+    os.makedirs(SESSIONS, exist_ok=True)
+    path = session_path(name)
+    # write then swap, so a crash can't lose the session
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(session, f, indent=2)
+    os.replace(path + ".tmp", path)
+
+
 def load_history():
     if not os.path.exists(HISTORY):
         return []
@@ -314,7 +339,7 @@ def main():
     parser.add_argument("--history", action="store_true", help="list logged clips")
     parser.add_argument("--model", choices=["5b", "14b"], default="5b", help="14b is better but much slower")
     parser.add_argument("--seed", type=int, help="repeat a clip's randomness; random by default")
-    parser.add_argument("--revise", metavar="FILE", help="develop a logged clip: the prompt is your change, and its settings and seed are kept")
+    parser.add_argument("--revise", metavar="FILE", help="develop a logged clip, or 'latest' in a session: the prompt is your change, and its settings and seed are kept")
     parser.add_argument("--auto-reference", action="store_true", help="find a YouTube clip matching the prompt and use it as --video")
     parser.add_argument("--reference-query", help="search words for --auto-reference, instead of the prompt")
     parser.add_argument("--tiled", action="store_true", help="decode in pieces: less memory, small risk of seams")
@@ -332,6 +357,10 @@ def main():
     parser.add_argument("--crf", type=float, help="H.264 quality: lower is better and larger, 18 is very good")
     parser.add_argument("--video", help="existing clip to rework")
     parser.add_argument("--strength", type=float, default=0.6)
+    parser.add_argument("--session", help="project name: remembers your instructions and clips between generations")
+    parser.add_argument("--remember", action="append", default=[], metavar="KEY=VALUE", help="save or replace an instruction, such as outfit=red t-shirt")
+    parser.add_argument("--forget", action="append", default=[], metavar="KEY", help="remove a saved instruction")
+    parser.add_argument("--memory", action="store_true", help="show what the session remembers, then stop")
     parser.add_argument("--animate", metavar="IMAGE", help="animate the subject in this image with the motion from --video, using Wan Animate")
     if "--best" in sys.argv:
         # as defaults, so any option typed explicitly still wins
@@ -348,20 +377,54 @@ def main():
         return rate_clip(*args.rate)
     if args.history:
         return show_history()
-    if not args.prompt:
+    session = load_session(args.session) if args.session else None
+    if session is None and (args.remember or args.forget or args.memory):
+        sys.exit("--remember, --forget and --memory need --session")
+    if session is not None:
+        for key in args.forget:
+            session["memory"].pop(key, None)
+        for item in args.remember:
+            key, separator, value = item.partition("=")
+            if not (separator and key.strip() and value.strip()):
+                sys.exit(f"--remember needs KEY=VALUE, not: {item}")
+            session["memory"][key.strip()] = value.strip()
+        if args.memory:
+            save_session(args.session, session)
+            print(json.dumps(session, indent=2))
+            return
+    revise_file = args.revise
+    if revise_file == "latest":
+        if not (session and session["clips"]):
+            sys.exit("--revise latest needs a --session that already has a clip")
+        revise_file = session["clips"][-1]
+    if not args.prompt and not revise_file and not (session and session["memory"]):
         parser.error("a prompt is required")
     change = None
-    if args.revise:
-        matches = [e for e in load_history() if e["file"] == args.revise]
+    if revise_file:
+        matches = [e for e in load_history() if e["file"] == revise_file]
         if not matches:
-            sys.exit(f"{args.revise} isn't in the history")
+            sys.exit(f"{revise_file} isn't in the history")
         original = matches[-1]
         # parse again so the clip's settings apply, but any option typed explicitly still wins
-        parser.set_defaults(**original["settings"], seconds=original["seconds"], seed=original["seed"], strength=0.5)
+        parser.set_defaults(**original["settings"], seconds=original["seconds"], seed=original["seed"], strength=0.5, animate=original.get("animate"))
         args = parser.parse_args()
+        args.revise = revise_file
         change = args.prompt
-        args.prompt = f'{original["prompt"]} {change}'
-        args.video = os.path.join(OUTPUT_VIDEO, args.revise)
+        if session is None:
+            if not change:
+                parser.error("a prompt is required")
+            args.prompt = f'{original["prompt"]} {change}'
+        elif not session["memory"]:
+            session["memory"]["scene"] = original["prompt"]
+        args.video = os.path.join(OUTPUT_VIDEO, revise_file)
+    if session is not None:
+        if change:
+            session["memory"][f'edit {len(session["memory"])}'] = change
+        elif args.prompt and not revise_file:
+            session["memory"]["scene"] = args.prompt
+        # the scene reads best first, whatever order things were remembered in
+        memory = session["memory"]
+        args.prompt = ", ".join(value for _, value in sorted(memory.items(), key=lambda item: item[0] != "scene"))
     if args.auto_reference:
         if args.video:
             sys.exit("--auto-reference can't be combined with --video or --revise")
@@ -405,6 +468,8 @@ def main():
     print(f"Rough time: about {minutes:.0f} min, based on your past clips" if minutes else "Rough time: no similar clips logged yet", flush=True)
     if args.estimate:
         return
+    if session is not None:
+        save_session(args.session, session)
     if args.crf is not None:
         workflow["11"]["inputs"].update({"format.codec": "h264", "format.codec.encoding": "re-encode", "format.codec.encoding.crf": args.crf})
     try:
@@ -435,10 +500,15 @@ def main():
                 "seconds": args.seconds,
                 "video": args.video,
                 "strength": args.strength if args.video else None,
+                "session": args.session,
+                "animate": args.animate,
                 "revised_from": args.revise,
                 "change": change,
                 "settings": {name: getattr(args, name) for name in SETTINGS},
             })
+            if session is not None:
+                session["clips"].append(history["outputs"]["11"]["images"][0]["filename"])
+                save_session(args.session, session)
             return
 
 

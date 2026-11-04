@@ -36,4 +36,12 @@ The user gives a prompt. If it's missing, ask for it.
 
 4. The last line of output lists the result under `"11"`: the file is `$HOME/ComfyUI/output/<subfolder>/<filename>`. Send it with SendUserFile and say how long it took. If the script exits with an error, tell the user what it said.
 
+## Sessions and subjects
+
+Use `--session <name>` on every generation in a project. Save lasting details as `--remember key=value`, and when the user changes one, replace it under the same key so instructions don't conflict. For an edit, use `--session <name> --revise latest "<the change>"`. `--memory` shows what's saved, and `--forget key` removes something.
+
+To keep a subject intact, use `--animate <image> --video <motion clip>`, which takes about 3 minutes at 704x480. A prompt can't change how that subject looks, so tell the user a new image is needed for that.
+
+The user can also use the page at `http://127.0.0.1:8190`, started with `C:\wan-video-studio\Start Wan Studio.bat`.
+
 Camera and framing are added to the prompt as text, so the model may not follow them exactly. Say so if a result ignores them. The time is a rough guide from past clips.

@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wan Studio</title>
+<style>
+:root { --bg: #f6f6f4; --panel: #fff; --text: #1d1d1b; --muted: #66665f; --line: #dcdcd6; --accent: #2457c5; --on-accent: #fff; --bad: #b3261e; color-scheme: light dark; }
+@media (prefers-color-scheme: dark) { :root { --bg: #171716; --panel: #22221f; --text: #efefea; --muted: #a9a9a0; --line: #3a3a35; --accent: #8fb0ff; --on-accent: #10203f; --bad: #ff9d94; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
+main { max-width: 1180px; margin: auto; padding: 20px 16px 48px; display: grid; gap: 20px; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); }
+@media (max-width: 800px) { main { grid-template-columns: minmax(0, 1fr); } }
+h1 { font-size: 22px; margin: 0 0 4px; grid-column: 1 / -1; }
+h2 { font-size: 15px; margin: 18px 0 8px; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0; }
+section > h2:first-child { margin-top: 0; }
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+input:not([type=checkbox]), select, textarea { display: block; width: 100%; margin-top: 3px; padding: 7px 8px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+textarea { min-height: 88px; resize: vertical; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
+.check { display: flex; gap: 7px; align-items: center; color: var(--text); font-size: 14px; }
+button { font: inherit; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+button:disabled { opacity: .55; cursor: default; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.hint { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; font-size: 12.5px; max-height: 190px; overflow: auto; margin: 8px 0 0; }
+.clips { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.clip { border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-width: 0; }
+.clip video { width: 100%; border-radius: 5px; background: #000; display: block; }
+.clip strong { display: block; margin-top: 7px; font-size: 13.5px; overflow-wrap: anywhere; }
+.clip p { margin: 3px 0 7px; font-size: 12.5px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.clip select { width: auto; display: inline-block; margin: 0; padding: 5px; }
+.clip button { padding: 5px 9px; font-size: 13px; }
+.memory li { margin-bottom: 5px; overflow-wrap: anywhere; }
+.memory ul { padding-left: 18px; margin: 6px 0; }
+.memory button { padding: 1px 7px; font-size: 12px; margin-left: 5px; }
+.error { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+<h1>Wan Studio</h1>
+<section>
+  <h2>Create</h2>
+  <form id="form">
+    <label>Prompt, or your edit
+      <textarea name="prompt" placeholder="A young woman running along a coastal road at sunrise"></textarea>
+    </label>
+    <label>Session name, to remember your instructions
+      <input name="session" list="sessions" placeholder="beach run">
+      <datalist id="sessions"></datalist>
+    </label>
+    <label class="check"><input type="checkbox" name="edit_latest"> Edit the latest clip in this session</label>
+
+    <h2>Quality and time</h2>
+    <label>Demand
+      <select name="preset">
+        <option value="draft">Draft: 5B, 704×480, about 2 minutes</option>
+        <option value="balanced" selected>Balanced: 14B, 704×480, about 6–16 minutes</option>
+        <option value="max">Max: 14B, 1280×704, about an hour or more</option>
+      </select>
+    </label>
+    <div class="grid">
+      <label>Frame rate
+        <select name="fps">
+          <option value="48" selected>48 fps, smoothest</option>
+          <option value="32">32 fps, 14B only</option>
+          <option value="24">24 fps, 5B only</option>
+          <option value="16">16 fps, 14B only</option>
+        </select>
+      </label>
+      <label>Seconds <input name="seconds" type="number" min="0.5" max="10" step="0.5" value="2"></label>
+      <label>Width <input name="width" type="number" min="256" max="1920" step="16" placeholder="From demand"></label>
+      <label>Height <input name="height" type="number" min="256" max="1920" step="16" placeholder="From demand"></label>
+    </div>
+
+    <h2>Camera</h2>
+    <div class="grid">
+      <label>Movement
+        <select name="camera"><option value="">Any</option><option>tracking</option><option>static</option><option>handheld</option><option>dolly-in</option><option>dolly-out</option><option>pan</option><option>orbit</option><option>drone</option></select>
+      </label>
+      <label>Angle
+        <select name="angle"><option value="">Any</option><option>eye-level</option><option>low</option><option>high</option><option>overhead</option><option>side</option><option>front</option><option>back</option></select>
+      </label>
+      <label>Framing
+        <select name="shot"><option value="">Any</option><option>full-body</option><option>medium</option><option>close-up</option><option>wide</option></select>
+      </label>
+      <label>Lens, mm <input name="lens" type="number" min="10" max="300" placeholder="35"></label>
+    </div>
+    <label>Lighting <input name="lighting" placeholder="golden hour backlight"></label>
+    <label>Style <input name="style" placeholder="documentary film"></label>
+    <p class="hint">Camera, framing, lighting and style are requests in the prompt, so the model may not follow them exactly.</p>
+
+    <h2>Keep the subject and copy motion (Animate)</h2>
+    <label>Subject image <input name="animate_file" type="file" accept="image/*"></label>
+    <label>Motion or reference video <input name="video_file" type="file" accept="video/*"></label>
+    <p class="hint">Both together use Wan Animate, about 3 minutes at 704×480. The look comes from the image, so to change an outfit, use a new image. A video alone reworks that clip.</p>
+    <label class="check"><input type="checkbox" name="auto_reference"> Find a YouTube reference automatically</label>
+    <p class="hint">Downloading may break the site's terms, and clips stay their owners' copyright. Automatic picks are often poor matches, so keep results private.</p>
+
+    <div class="row">
+      <button class="primary" type="submit" id="go">Generate</button>
+      <button type="button" id="estimate">Check time</button>
+      <button type="button" id="stop" disabled>Stop</button>
+    </div>
+  </form>
+  <pre id="log" role="status">Ready.</pre>
+
+  <div class="memory" id="memoryBox" hidden>
+    <h2>This session remembers</h2>
+    <ul id="memory"></ul>
+    <label>Add or replace, as name=value <input id="remember" placeholder="outfit=grey t-shirt"></label>
+    <button type="button" id="addMemory">Save</button>
+  </div>
+</section>
+
+<section>
+  <h2>Your clips</h2>
+  <div class="clips" id="clips"></div>
+</section>
+</main>
+<script>
+const form = document.getElementById('form');
+const logBox = document.getElementById('log');
+const go = document.getElementById('go');
+const stop = document.getElementById('stop');
+const api = async (path, body) => {
+  const response = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || data.message || 'Request failed');
+  return data;
+};
+const upload = async file => {
+  const response = await fetch('/api/upload?name=' + encodeURIComponent(file.name), { method: 'POST', body: file });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error);
+  return data.path;
+};
+
+async function collect() {
+  const data = Object.fromEntries(new FormData(form));
+  const body = {};
+  for (const name of ['prompt', 'session', 'preset', 'fps', 'seconds', 'width', 'height', 'camera', 'angle', 'shot', 'lens', 'lighting', 'style']) body[name] = data[name];
+  body.tiled = true;
+  body.auto_reference = !!data.auto_reference;
+  if (data.edit_latest) {
+    if (!data.session) throw new Error('Enter a session name to edit its latest clip.');
+    body.revise = 'latest';
+    for (const name of ['preset', 'fps', 'seconds', 'width', 'height']) delete body[name];
+  }
+  const image = form.elements.animate_file.files[0];
+  const video = form.elements.video_file.files[0];
+  if (image) {
+    if (!video && !data.edit_latest && !data.auto_reference) throw new Error('A subject image also needs a motion video.');
+    logBox.textContent = 'Uploading image...';
+    body.animate = await upload(image);
+  }
+  if (video) {
+    logBox.textContent = 'Uploading video...';
+    body.video = await upload(video);
+  }
+  return body;
+}
+
+async function start(estimate) {
+  logBox.classList.remove('error');
+  try {
+    const body = await collect();
+    if (estimate) body.estimate = true;
+    await api('/api/generate', body);
+    poll();
+  } catch (error) {
+    logBox.textContent = error.message;
+    logBox.classList.add('error');
+  }
+}
+
+let wasRunning = false;
+async function poll() {
+  const state = await api('/api/job');
+  go.disabled = state.running;
+  stop.disabled = !state.running;
+  if (state.log || state.running) {
+    logBox.textContent = (state.running ? 'Running. Step-by-step progress is in the ComfyUI server window.\n' : '') + state.log.replace(/\{"\d+": \{"images".*$/m, '');
+    logBox.classList.toggle('error', !state.running && state.code);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+  if (wasRunning && !state.running) { loadClips(); loadSessions(); loadMemory(); }
+  wasRunning = state.running;
+  if (state.running) setTimeout(poll, 3000);
+}
+
+function clipCard(clip) {
+  const s = clip.settings;
+  const card = document.createElement('article');
+  card.className = 'clip';
+  const video = document.createElement('video');
+  video.src = '/video/' + encodeURIComponent(clip.file);
+  video.controls = true; video.loop = true; video.preload = 'metadata';
+  const title = document.createElement('strong');
+  title.textContent = `${clip.file}: ${s.model}, ${s.width}×${s.height}, ${clip.minutes} min`;
+  const prompt = document.createElement('p');
+  prompt.textContent = clip.prompt;
+  prompt.title = clip.prompt;
+  const rate = document.createElement('select');
+  rate.setAttribute('aria-label', 'Rate ' + clip.file);
+  rate.innerHTML = '<option value="">Rate</option>' + [5, 4, 3, 2, 1].map(n => `<option>${n}</option>`).join('');
+  rate.value = clip.rating || '';
+  rate.onchange = () => rate.value && api('/api/rate', { file: clip.file, score: rate.value }).catch(error => { logBox.textContent = error.message; });
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.append(rate);
+  card.append(video, title, prompt, row);
+  return card;
+}
+async function loadClips() {
+  const clips = await api('/api/clips');
+  document.getElementById('clips').replaceChildren(...clips.map(clipCard));
+}
+async function loadSessions() {
+  const names = await api('/api/sessions');
+  document.getElementById('sessions').replaceChildren(...names.map(n => Object.assign(document.createElement('option'), { value: n })));
+}
+async function loadMemory() {
+  const name = form.elements.session.value.trim();
+  const box = document.getElementById('memoryBox');
+  box.hidden = !name;
+  if (!name) return;
+  const session = await api('/api/session?name=' + encodeURIComponent(name)).catch(() => null);
+  if (!session) { box.hidden = true; return; }
+  document.getElementById('memory').replaceChildren(...Object.entries(session.memory).map(([key, value]) => {
+    const item = document.createElement('li');
+    item.textContent = `${key}: ${value}`;
+    const remove = document.createElement('button');
+    remove.type = 'button'; remove.textContent = 'Remove';
+    remove.setAttribute('aria-label', 'Remove ' + key);
+    remove.onclick = () => api('/api/memory', { session: name, forget: key }).then(loadMemory);
+    item.append(remove);
+    return item;
+  }));
+}
+form.addEventListener('submit', event => { event.preventDefault(); start(false); });
+document.getElementById('estimate').onclick = () => start(true);
+stop.onclick = () => api('/api/stop', {}).then(poll);
+form.elements.session.addEventListener('change', loadMemory);
+document.getElementById('addMemory').onclick = async () => {
+  const input = document.getElementById('remember');
+  try {
+    await api('/api/memory', { session: form.elements.session.value.trim(), remember: input.value });
+    input.value = '';
+    loadMemory();
+  } catch (error) { logBox.textContent = error.message; logBox.classList.add('error'); }
+};
+loadClips(); loadSessions(); poll();
+</script>
+</body>
+</html>

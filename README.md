@@ -2,6 +2,34 @@
 
 Make videos locally with ComfyUI and open-source Wan 2.2 models, with no credits.
 
+## Wan Studio page
+
+Double-click `Start Wan Studio.bat` to start ComfyUI and the page, then bookmark `http://127.0.0.1:8190`. The
+bookmark only works while they're running. The page has the prompt, your settings, uploads, session memory, past
+clips and ratings.
+
+## Keeping the subject intact
+
+`--animate IMAGE --video CLIP` animates the subject in the image with the motion from the clip, using the distilled
+Wan Animate model. It keeps the subject far steadier than the other modes, and takes about 3 minutes for 2 seconds
+at 704x480. The look comes from the image, so a prompt can't change an outfit: use a new image for that. It also
+needs `wan_animate_2_distill_int8_convrot.safetensors`, `clip_vision_h.safetensors` and `Wan2_1_VAE_bf16.safetensors`
+from Comfy-Org's `Wan-Animate-2` on Hugging Face.
+
+## Sessions
+
+`--session NAME` saves your scene and clips in `~/ComfyUI/output/sessions`, so nothing you asked for gets lost.
+
+```bash
+"$HOME/ComfyUI/venv/Scripts/python.exe" generate_video.py "your scene" --session beach --remember "outfit=grey t-shirt"
+```
+```bash
+"$HOME/ComfyUI/venv/Scripts/python.exe" generate_video.py "she runs at an easy pace" --session beach --revise latest
+```
+
+`--remember KEY=VALUE` saves or replaces an instruction, `--forget KEY` removes one, and `--memory` shows them.
+`--revise latest` starts from the session's newest clip.
+
 ## Setup
 
 ComfyUI is expected at `~/ComfyUI` with its own Python environment in `venv`. Start it first:
