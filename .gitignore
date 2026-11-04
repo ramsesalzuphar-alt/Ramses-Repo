@@ -4,6 +4,8 @@ frames/
 *.mp4
 *.safetensors
 *.gguf
+NOTES.md
 # one-off helpers with paths and sizes for a single download
 keep-awake.ps1
 progress.ps1
+replay_test.py

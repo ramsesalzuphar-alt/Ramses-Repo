@@ -39,8 +39,17 @@ Clips are saved to `~/ComfyUI/output/video`.
 | `--seconds` | Clip length | 2 |
 | `--width`, `--height` | Size. 1280 by 704 is the 5B model's native size | 704 by 480 |
 | `--steps` | More is slightly better and slower | 20 |
-| `--video`, `--strength` | Rework a clip (5B only). Lower strength stays closer to it | None, 0.6 |
-| `--model` | `5b` or `14b`. 14B is text-only and not yet tested | `5b` |
+| `--video`, `--strength` | Rework a clip. Lower strength stays closer to it | None, 0.6 |
+| `--auto-reference` | Find a YouTube clip matching the prompt and use it as `--video` | Off |
+| `--reference-query` | Search words for `--auto-reference`, instead of the prompt | None |
+| `--revise FILE` | Develop a logged clip. The prompt is your change; its settings and seed are kept, at strength 0.5 | None |
+| `--seed` | Repeat a clip's randomness | Random |
+| `--model` | `5b` or `14b`. 14B looks more consistent but is much slower | `5b` |
+| `--preset` | `draft`, `balanced` or `max`. Other options override it | None |
+| `--fps` | Final frame rate. 14B: 16, 32 or 48. 5B: 24 or 48 | 16 smoothed to 48 on 14B, 24 on 5B |
+| `--camera`, `--angle`, `--shot` | Added to the prompt as text, so the model may not follow them exactly | None |
+| `--lens`, `--lighting`, `--style` | Also added to the prompt as text | None |
+| `--estimate` | Show the settings and a rough time, then stop | Off |
 | `--tiled` | Decode in pieces: less memory, small risk of seams | Off |
 | `--upscale` | Double the resolution | Off |
 | `--smooth` | Double the frame rate | Off |
@@ -74,6 +83,12 @@ All 2 seconds, using the 5B model.
 | 704x480, 20 steps, upscaled and smoothed | 3.2 min |
 | 1280x704, 30 steps | 13.5 min |
 | 1280x704, 30 steps, `--tiled` | 6.7 min |
+| 14B, 704x480, 49 frames, 20 steps, `--tiled` | 16.4 min |
+| 14B, 1280x704, 49 frames, 20 steps, `--tiled` | 76.2 min |
+| 14B from a reference clip, 704x480, 33 frames, strength 0.6 | 6.5 min |
+
+`--revise` and references run, but a revision at strength 0.5 did not follow a request to change a shirt's colour.
+Motion and composition carry over better than specific prompt details.
 
 ## Claude Code skill
 
