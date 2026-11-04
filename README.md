@@ -46,11 +46,23 @@ Clips are saved to `~/ComfyUI/output/video`.
 | `--smooth` | Double the frame rate | Off |
 | `--crf` | H.264 quality. Lower is better and larger | Automatic |
 
-Example at the highest settings tested:
+## Best settings and ratings
+
+Every finished clip is logged to `~/ComfyUI/output/history.jsonl` with its prompt, seed, settings and time.
 
 ```bash
-"$HOME/ComfyUI/venv/Scripts/python.exe" generate_video.py "your prompt" --width 1280 --height 704 --steps 30 --crf 12
+"$HOME/ComfyUI/venv/Scripts/python.exe" generate_video.py "your prompt" --best
 ```
+```bash
+"$HOME/ComfyUI/venv/Scripts/python.exe" generate_video.py --history
+```
+```bash
+"$HOME/ComfyUI/venv/Scripts/python.exe" generate_video.py --rate wan_00006_.mp4 5
+```
+
+`--best` reuses the settings of your top-rated clip, 4 or 5 out of 5, with the newest winning a tie. It always
+turns smoothing on. With no such rating, it uses 1280x704, 30 steps, tiled decoding and `--crf 12`. Any option
+you type yourself overrides it. Ratings choose settings only; the model itself doesn't learn from them.
 
 ## Timings on an RTX 3070 Laptop (8 GB)
 
@@ -61,6 +73,7 @@ All 2 seconds, using the 5B model.
 | 704x480, 20 steps | 1.7 min |
 | 704x480, 20 steps, upscaled and smoothed | 3.2 min |
 | 1280x704, 30 steps | 13.5 min |
+| 1280x704, 30 steps, `--tiled` | 6.7 min |
 
 ## Claude Code skill
 

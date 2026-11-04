@@ -5,6 +5,9 @@ Usage: python generate_video.py "prompt" [--seconds 2] [--width 704] [--height 4
 
 --video reworks an existing clip to match the prompt, keeping its motion and framing.
 --strength is how much may change: low stays close to the clip, 1.0 ignores it.
+
+Every finished clip is logged. --history lists them, --rate wan_00006_.mp4 5 scores one,
+and --best reuses the settings of the top-rated clip with smoothing on.
 """
 import argparse
 import ctypes
@@ -21,6 +24,9 @@ import av
 
 SERVER = "http://127.0.0.1:8188"
 COMFY_INPUT = os.path.expanduser("~/ComfyUI/input")
+HISTORY = os.path.expanduser("~/ComfyUI/output/history.jsonl")
+SETTINGS = ("model", "width", "height", "steps", "crf", "tiled", "upscale", "smooth")
+BEST_PRESET = {"model": "5b", "width": 1280, "height": 704, "steps": 30, "crf": 12.0, "tiled": True, "upscale": False, "smooth": True}
 FPS = 24
 NEGATIVE = (
     "blurry, low quality, distorted, deformed, extra limbs, extra fingers, bad anatomy, "
@@ -121,6 +127,47 @@ def add_finishing(workflow, width, height, tiled, upscale, smooth):
     workflow["10"]["inputs"]["images"] = images
 
 
+def load_history():
+    if not os.path.exists(HISTORY):
+        return []
+    with open(HISTORY, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def log_run(entry):
+    with open(HISTORY, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def best_settings(entries):
+    # only clips rated 4 or 5 count, and the newest wins a tie
+    rated = [e for e in reversed(entries) if e.get("rating", 0) >= 4]
+    settings = max(rated, key=lambda e: e["rating"])["settings"] if rated else BEST_PRESET
+    return {**settings, "smooth": True}
+
+
+def rate_clip(filename, score):
+    if score not in ("1", "2", "3", "4", "5"):
+        sys.exit("Rating must be a whole number from 1 to 5")
+    entries = load_history()
+    matches = [e for e in entries if e["file"] == filename]
+    if not matches:
+        sys.exit(f"{filename} isn't in the history")
+    matches[-1]["rating"] = int(score)
+    # write then swap, so a crash can't lose the log
+    with open(HISTORY + ".tmp", "w", encoding="utf-8") as f:
+        f.writelines(json.dumps(e) + "\n" for e in entries)
+    os.replace(HISTORY + ".tmp", HISTORY)
+    print(f"Rated {filename} {score}/5")
+
+
+def show_history():
+    for e in load_history():
+        s = e["settings"]
+        extras = [name for name in ("tiled", "upscale", "smooth") if s.get(name)]
+        print(f'{e["file"]}  {e.get("rating", "-")}/5  {e["minutes"]} min  {s["model"]} {s["width"]}x{s["height"]} {s["steps"]} steps {" ".join(extras)}  {e["prompt"][:50]}')
+
+
 def request(path, payload=None):
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(SERVER + path, data=data, headers={"Content-Type": "application/json"})
@@ -130,11 +177,14 @@ def request(path, payload=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("prompt")
+    parser.add_argument("prompt", nargs="?")
     parser.add_argument("--seconds", type=float, default=2)
     parser.add_argument("--width", type=int, default=704)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--steps", type=int, default=20)
+    parser.add_argument("--best", action="store_true", help="use the top-rated settings, with smoothing; other options still override")
+    parser.add_argument("--rate", nargs=2, metavar=("FILE", "SCORE"), help="score a logged clip from 1 to 5")
+    parser.add_argument("--history", action="store_true", help="list logged clips")
     parser.add_argument("--model", choices=["5b", "14b"], default="5b", help="14b is better but much slower, and text-only")
     parser.add_argument("--tiled", action="store_true", help="decode in pieces: less memory, small risk of seams")
     parser.add_argument("--upscale", action="store_true", help="double the resolution with RealESRGAN")
@@ -142,7 +192,16 @@ def main():
     parser.add_argument("--crf", type=float, help="H.264 quality: lower is better and larger, 18 is very good")
     parser.add_argument("--video", help="existing clip to rework")
     parser.add_argument("--strength", type=float, default=0.6)
+    if "--best" in sys.argv:
+        # as defaults, so any option typed explicitly still wins
+        parser.set_defaults(**best_settings(load_history()))
     args = parser.parse_args()
+    if args.rate:
+        return rate_clip(*args.rate)
+    if args.history:
+        return show_history()
+    if not args.prompt:
+        parser.error("a prompt is required")
     if not 0 < args.strength <= 1:
         sys.exit("--strength must be above 0 and at most 1")
     if args.model == "14b" and args.video:
@@ -180,10 +239,24 @@ def main():
         if status.get("completed"):
             print(f"Finished in {(time.time() - started) / 60:.1f} min")
             print(json.dumps(history["outputs"]))
+            log_run({
+                "file": history["outputs"]["11"]["images"][0]["filename"],
+                "time": time.strftime("%Y-%m-%d %H:%M"),
+                "minutes": round((time.time() - started) / 60, 1),
+                "prompt": args.prompt,
+                "seed": seed,
+                "seconds": args.seconds,
+                "video": args.video,
+                "strength": args.strength if args.video else None,
+                "settings": {name: getattr(args, name) for name in SETTINGS},
+            })
             return
 
 
 if __name__ == "__main__":
     assert frame_count(2) == 49 and frame_count(5) == 121
     assert [valid_frames(n) for n in (5, 6, 8, 9, 49, 50)] == [5, 5, 5, 9, 49, 49]
+    assert best_settings([]) == BEST_PRESET
+    assert best_settings([{"rating": 3, "settings": {"steps": 1}}]) == BEST_PRESET
+    assert best_settings([{"rating": 5, "settings": {"steps": 1}}, {"rating": 5, "settings": {"steps": 2}}, {"settings": {"steps": 3}}]) == {"steps": 2, "smooth": True}
     main()

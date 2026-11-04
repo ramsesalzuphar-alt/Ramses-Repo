@@ -19,7 +19,10 @@ The user gives a video file and a prompt. If either is missing, ask for it. Don'
    - `--strength`: lower to stay closer to the clip ("keep it similar"), higher to change more. Above 0, at most 1.
    - `--seconds`: how much of the clip to use. The default is 2.
    - `--width` and `--height`: the default is 704 by 480. 1280 by 704 is sharper and slower.
+   - `--best`: for "best quality". Uses the top-rated settings with smoothing.
 
 3. The last line of output lists the result under `"11"`: the file is `$HOME/ComfyUI/output/<subfolder>/<filename>`. Send it with SendUserFile and say how long it took. If the script exits with an error, tell the user what it said.
+
+When the user rates a clip, run the script with `--rate <filename> <1-5>`. `--history` lists past clips.
 
 The input is copied into `~/ComfyUI/input` under the same name, replacing any earlier file with that name.
