@@ -20,8 +20,8 @@ UPLOADS = os.path.join(g.COMFY_INPUT, "uploads")
 JOB_LOG = os.path.join(os.path.expanduser("~/ComfyUI/output"), "studio_job.log")
 MAX_UPLOAD = 2 * 1024**3
 # form fields passed straight to generate_video.py as --name value
-VALUE_FIELDS = ("preset", "model", "width", "height", "seconds", "steps", "fps", "camera", "angle", "shot", "lens", "lighting", "style", "strength", "session", "video", "animate", "revise", "reference_query", "crf")
-FLAG_FIELDS = ("tiled", "upscale", "auto_reference", "estimate")
+VALUE_FIELDS = ("preset", "model", "width", "height", "seconds", "steps", "fps", "camera", "angle", "shot", "lens", "lighting", "style", "strength", "session", "video", "animate", "revise", "reference_query", "crf", "tries", "music")
+FLAG_FIELDS = ("tiled", "upscale", "auto_reference", "estimate", "final")
 job = None
 job_session = ""
 
@@ -37,6 +37,8 @@ def build_command(form):
     for name in FLAG_FIELDS:
         if form.get(name):
             command.append("--" + name.replace("_", "-"))
+    if form.get("join"):
+        command += ["--join", *[str(name) for name in form["join"]]]
     for item in form.get("remember") or []:
         command += ["--remember", str(item)]
     return command
@@ -201,8 +203,8 @@ class Handler(BaseHTTPRequestHandler):
         name = os.path.basename(urllib.parse.parse_qs(url.query).get("name", [""])[0])
         name = re.sub(r"[^\w.-]", "_", name)
         length = int(self.headers.get("Content-Length") or 0)
-        if not name.lower().endswith((".mp4", ".mov", ".webm", ".mkv", ".png", ".jpg", ".jpeg", ".webp")):
-            return self.respond({"error": "Use an MP4, MOV, WEBM, MKV, PNG, JPG or WEBP file"}, 400)
+        if not name.lower().endswith((".mp4", ".mov", ".webm", ".mkv", ".png", ".jpg", ".jpeg", ".webp", ".mp3", ".wav", ".m4a")):
+            return self.respond({"error": "Use a video, PNG, JPG, WEBP, MP3, WAV or M4A file"}, 400)
         if not 0 < length <= MAX_UPLOAD:
             return self.respond({"error": "File must be under 2 GB"}, 400)
         os.makedirs(UPLOADS, exist_ok=True)

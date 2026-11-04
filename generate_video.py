@@ -256,6 +256,46 @@ def add_finishing(workflow, width, height, tiled, upscale, smooth, target_fps=No
     workflow["10"]["inputs"]["images"] = images
 
 
+def finish_clip(name):
+    """Save a graded copy with light sharpening and film grain, which hide some of the raw AI look."""
+    source = os.path.join(OUTPUT_VIDEO, name)
+    final = os.path.splitext(name)[0] + "_final.mp4"
+    grade = "eq=contrast=1.06:saturation=1.08,unsharp=5:5:0.6,noise=alls=7:allf=t"
+    command = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-i", source, "-vf", grade, "-c:v", "libx264", "-crf", "14", "-pix_fmt", "yuv420p", "-c:a", "copy", os.path.join(OUTPUT_VIDEO, final)]
+    if subprocess.run(command).returncode != 0:
+        sys.exit(f"Could not finish {name}")
+    return final
+
+
+def join_clips(names, music):
+    """Cut clips into one film, matching the first clip's size and frame rate, with optional music."""
+    paths = [os.path.join(OUTPUT_VIDEO, os.path.basename(n)) for n in names]
+    missing = [p for p in paths if not os.path.isfile(p)]
+    if len(paths) < 2 or missing:
+        sys.exit(f"--join needs at least two existing clips. Missing: {missing}")
+    if music and not os.path.isfile(music):
+        sys.exit(f"Music not found: {music}")
+    with av.open(paths[0]) as container:
+        stream = container.streams.video[0]
+        width, height, fps = stream.width, stream.height, float(stream.average_rate)
+    fit = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps:g},setsar=1"
+    parts = ";".join(f"[{i}:v]{fit}[v{i}]" for i in range(len(paths)))
+    concat = "".join(f"[v{i}]" for i in range(len(paths))) + f"concat=n={len(paths)}:v=1:a=0[out]"
+    name = time.strftime("film_%Y%m%d_%H%M%S.mp4")
+    command = [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error"]
+    for path in paths:
+        command += ["-i", path]
+    if music:
+        command += ["-i", music]
+    command += ["-filter_complex", f"{parts};{concat}", "-map", "[out]"]
+    if music:
+        command += ["-map", f"{len(paths)}:a:0", "-c:a", "aac", "-shortest"]
+    command += ["-c:v", "libx264", "-crf", "14", "-pix_fmt", "yuv420p", os.path.join(OUTPUT_VIDEO, name)]
+    if subprocess.run(command).returncode != 0:
+        sys.exit("Could not join the clips")
+    return name, width, height, fps
+
+
 def session_path(name):
     if not re.fullmatch(r"[\w -]+", name):
         sys.exit("Session names can only use letters, numbers, spaces, - and _")
@@ -294,7 +334,7 @@ def log_run(entry):
 def best_settings(entries):
     # only clips rated 4 or 5 count, and the newest wins a tie
     # Animate clips are skipped because those settings need a subject image and clip
-    rated = [e for e in reversed(entries) if e.get("rating", 0) >= 4 and e["settings"].get("model") != "animate"]
+    rated = [e for e in reversed(entries) if e.get("rating", 0) >= 4 and e["settings"].get("model") not in ("animate", "film")]
     settings = max(rated, key=lambda e: e["rating"])["settings"] if rated else BEST_PRESET
     return {**settings, "smooth": True}
 
@@ -358,6 +398,10 @@ def main():
     parser.add_argument("--crf", type=float, help="H.264 quality: lower is better and larger, 18 is very good")
     parser.add_argument("--video", help="existing clip to rework")
     parser.add_argument("--strength", type=float, default=0.6)
+    parser.add_argument("--tries", type=int, default=1, help="make this many versions with different seeds, 1 to 10")
+    parser.add_argument("--final", action="store_true", help="also save a graded copy with light sharpening and film grain")
+    parser.add_argument("--join", nargs="+", metavar="CLIP", help="cut these logged clips into one film")
+    parser.add_argument("--music", help="audio file to play over --join")
     parser.add_argument("--session", help="project name: remembers your instructions and clips between generations")
     parser.add_argument("--remember", action="append", default=[], metavar="KEY=VALUE", help="save or replace an instruction, such as outfit=red t-shirt")
     parser.add_argument("--forget", action="append", default=[], metavar="KEY", help="remove a saved instruction")
@@ -378,6 +422,25 @@ def main():
         return rate_clip(*args.rate)
     if args.history:
         return show_history()
+    if args.join:
+        name, width, height, fps = join_clips(args.join, args.music)
+        final = finish_clip(name) if args.final else None
+        log_run({"file": name, "final": final, "time": time.strftime("%Y-%m-%d %H:%M"), "minutes": 0, "prompt": "Film: " + ", ".join(args.join), "seed": None, "seconds": None, "video": None, "strength": None, "session": args.session, "animate": None, "revised_from": None, "change": None, "settings": {"model": "film", "width": width, "height": height, "steps": 0, "crf": 14, "tiled": False, "upscale": False, "smooth": False, "fps": fps}})
+        print(f"Finished in 0.0 min\nSaved: {final or name}")
+        return
+    if not 1 <= args.tries <= 10:
+        sys.exit("--tries must be from 1 to 10")
+    if args.tries > 1:
+        one = sys.argv[1:]
+        at = one.index("--tries")
+        del one[at:at + 2]
+        for number in range(args.tries):
+            print(f"=== Try {number + 1} of {args.tries}", flush=True)
+            # a random seed each time, because --revise would otherwise repeat the same one
+            code = subprocess.run([sys.executable, os.path.abspath(__file__), *one, "--seed", str(random.randrange(2**32))]).returncode
+            if code:
+                sys.exit(code)
+        return
     session = load_session(args.session) if args.session else None
     if session is None and (args.remember or args.forget or args.memory):
         sys.exit("--remember, --forget and --memory need --session")
@@ -495,8 +558,10 @@ def main():
         if status.get("completed"):
             print(f"Finished in {(time.time() - started) / 60:.1f} min")
             print(json.dumps(history["outputs"]))
+            clip = history["outputs"]["11"]["images"][0]["filename"]
             log_run({
-                "file": history["outputs"]["11"]["images"][0]["filename"],
+                "file": clip,
+                "final": finish_clip(clip) if args.final else None,
                 "time": time.strftime("%Y-%m-%d %H:%M"),
                 "minutes": round((time.time() - started) / 60, 1),
                 "prompt": args.prompt,

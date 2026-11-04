@@ -94,6 +94,10 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); bor
         </select>
       </label>
       <label>Seconds <input name="seconds" type="number" min="0.5" max="10" step="0.5" value="2"></label>
+      <label>Versions to try <input name="tries" type="number" min="1" max="10" value="1"></label>
+      <label class="check" style="align-self: end"><input type="checkbox" name="final"> Add film finish</label>
+      <label class="check"><input type="checkbox" name="upscale"> Double the size</label>
+      <span></span>
       <label>Width <input name="width" type="number" min="256" max="1920" step="16" placeholder="From demand"></label>
       <label>Height <input name="height" type="number" min="256" max="1920" step="16" placeholder="From demand"></label>
     </div>
@@ -162,6 +166,10 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); bor
 </section>
 <section>
   <h2 id="clipsTitle">All clips</h2>
+  <div class="row" style="margin-bottom: 12px">
+    <label style="margin: 0">Music for the film, optional <input id="filmMusic" type="file" accept="audio/*"></label>
+    <button type="button" id="joinFilm">Join ticked clips into a film</button>
+  </div>
   <div class="clips" id="clips"></div>
 </section>
 </div>
@@ -267,6 +275,9 @@ async function collect() {
   const body = {};
   for (const name of ['prompt', 'session', 'preset', 'fps', 'seconds', 'width', 'height', 'camera', 'angle', 'shot', 'lens', 'lighting', 'style']) body[name] = data[name];
   body.tiled = true;
+  body.tries = data.tries;
+  body.final = !!data.final;
+  body.upscale = !!data.upscale;
   body.auto_reference = !!data.auto_reference;
   if (data.edit_latest) {
     if (!data.session) throw new Error('Open or create a session tab to edit its latest clip.');
@@ -327,7 +338,7 @@ function clipCard(clip) {
   const card = document.createElement('article');
   card.className = 'clip';
   const video = document.createElement('video');
-  video.src = '/video/' + encodeURIComponent(clip.file);
+  video.src = '/video/' + encodeURIComponent(clip.final || clip.file);
   video.controls = true; video.loop = true; video.preload = 'metadata';
   const title = document.createElement('strong');
   title.textContent = `${clip.file}: ${s.model}, ${s.width}×${s.height}, ${clip.minutes} min`;
@@ -339,9 +350,17 @@ function clipCard(clip) {
   rate.innerHTML = '<option value="">Rate</option>' + [5, 4, 3, 2, 1].map(n => `<option>${n}</option>`).join('');
   rate.value = clip.rating || '';
   rate.onchange = () => rate.value && api('/api/rate', { file: clip.file, score: rate.value }).catch(error => { logBox.textContent = error.message; });
+  const pick = document.createElement('label');
+  pick.className = 'check';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.className = 'joinPick';
+  box.value = clip.file;
+  pick.append(box, 'Add to film');
+  pick.style.margin = '0';
   const row = document.createElement('div');
   row.className = 'row';
-  row.append(rate);
+  row.append(rate, pick);
   card.append(video, title, prompt, row);
   return card;
 }
@@ -492,6 +511,19 @@ form.addEventListener('submit', event => {
   start(false);
 });
 document.getElementById('suggest').onclick = showSuggestions;
+document.getElementById('joinFilm').onclick = async () => {
+  // newest clips are listed first, so reverse to cut them in the order they were made
+  const join = [...document.querySelectorAll('.joinPick:checked')].map(box => box.value).reverse();
+  logBox.classList.remove('error');
+  try {
+    if (join.length < 2) throw new Error('Tick at least two clips to join.');
+    const music = document.getElementById('filmMusic').files[0];
+    const body = { join, session: form.elements.session.value, final: form.elements.final.checked };
+    if (music) { logBox.textContent = 'Uploading music...'; body.music = await upload(music); }
+    await api('/api/generate', body);
+    poll();
+  } catch (error) { logBox.textContent = error.message; logBox.classList.add('error'); }
+};
 document.getElementById('estimate').onclick = () => start(true);
 stop.onclick = () => api('/api/stop', {}).then(poll);
 document.getElementById('newSession').addEventListener('submit', async event => {

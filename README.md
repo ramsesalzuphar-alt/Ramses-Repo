@@ -120,6 +120,13 @@ All 2 seconds, using the 5B model.
 | 14B from a reference clip, 704x480, 33 frames, strength 0.6 | 6.5 min |
 | Animate, 704x480, 33 frames, smoothed to 48 fps | 2.7 min |
 | Animate, 1280x704, 33 frames, smoothed to 48 fps | 24.4 min |
+| Animate, 704x480 upscaled to 1408x960, 49 frames, 48 fps, `--final` | 6.2 min |
+
+## Getting the best free result
+
+Use `--animate` with a sharp subject image and a steady full-body reference, then `--upscale --final`. Add
+`--tries 5` and keep the best, since results vary a lot by seed. `--join a.mp4 b.mp4 --music song.mp3` cuts your best
+clips into one film. All of this is on the Wan Studio page too.
 
 `--revise` and references run, but a revision at strength 0.5 did not follow a request to change a shirt's colour.
 Motion and composition carry over better than specific prompt details.
