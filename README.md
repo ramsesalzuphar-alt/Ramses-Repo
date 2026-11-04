@@ -114,6 +114,8 @@ All 2 seconds, using the 5B model.
 | 14B, 704x480, 49 frames, 20 steps, `--tiled` | 16.4 min |
 | 14B, 1280x704, 49 frames, 20 steps, `--tiled` | 76.2 min |
 | 14B from a reference clip, 704x480, 33 frames, strength 0.6 | 6.5 min |
+| Animate, 704x480, 33 frames, smoothed to 48 fps | 2.7 min |
+| Animate, 1280x704, 33 frames, smoothed to 48 fps | 24.4 min |
 
 `--revise` and references run, but a revision at strength 0.5 did not follow a request to change a shirt's colour.
 Motion and composition carry over better than specific prompt details.

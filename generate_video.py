@@ -293,7 +293,8 @@ def log_run(entry):
 
 def best_settings(entries):
     # only clips rated 4 or 5 count, and the newest wins a tie
-    rated = [e for e in reversed(entries) if e.get("rating", 0) >= 4]
+    # Animate clips are skipped because those settings need a subject image and clip
+    rated = [e for e in reversed(entries) if e.get("rating", 0) >= 4 and e["settings"].get("model") != "animate"]
     settings = max(rated, key=lambda e: e["rating"])["settings"] if rated else BEST_PRESET
     return {**settings, "smooth": True}
 
