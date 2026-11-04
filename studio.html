@@ -38,6 +38,9 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); bor
 .memory ul { padding-left: 18px; margin: 6px 0; }
 .memory button { padding: 1px 7px; font-size: 12px; margin-left: 5px; }
 .error { color: var(--bad); }
+.tabs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.tabs button[aria-current] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.tabs input { width: 180px; margin: 0; }
 .suggestions { display: grid; gap: 8px; margin: 8px 0; }
 .suggestion { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
 .suggestion img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; display: block; }
@@ -50,16 +53,20 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); bor
 <body>
 <main>
 <h1>Wan Studio <small style="font-size: 14px; font-weight: 400"><a href="http://127.0.0.1:8188" target="_blank" rel="noopener" style="color: var(--accent)">Open ComfyUI</a></small></h1>
+<nav class="tabs" aria-label="Sessions">
+  <div class="row" id="tabs"></div>
+  <form class="row" id="newSession">
+    <input id="newName" aria-label="New session name" placeholder="New session name" maxlength="60">
+    <button type="submit">New session</button>
+  </form>
+</nav>
 <section>
   <h2>Create</h2>
   <form id="form">
     <label>Prompt, or your edit
       <textarea name="prompt" placeholder="A young woman running along a coastal road at sunrise"></textarea>
     </label>
-    <label>Session name, to remember your instructions
-      <input name="session" list="sessions" placeholder="beach run">
-      <datalist id="sessions"></datalist>
-    </label>
+    <input type="hidden" name="session">
     <label class="check"><input type="checkbox" name="edit_latest"> Edit the latest clip in this session</label>
 
     <h2>Quality and time</h2>
@@ -134,7 +141,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); bor
 </section>
 
 <section>
-  <h2>Your clips</h2>
+  <h2 id="clipsTitle">All clips</h2>
   <div class="clips" id="clips"></div>
 </section>
 </main>
@@ -241,7 +248,7 @@ async function collect() {
   body.tiled = true;
   body.auto_reference = !!data.auto_reference;
   if (data.edit_latest) {
-    if (!data.session) throw new Error('Enter a session name to edit its latest clip.');
+    if (!data.session) throw new Error('Open or create a session tab to edit its latest clip.');
     body.revise = 'latest';
     for (const name of ['preset', 'fps', 'seconds', 'width', 'height']) delete body[name];
   }
@@ -274,18 +281,24 @@ async function start(estimate) {
 }
 
 let wasRunning = false;
+let pollTimer;
 async function poll() {
   const state = await api('/api/job');
   go.disabled = state.running;
   stop.disabled = !state.running;
-  if (state.log || state.running) {
+  const current = form.elements.session.value;
+  // a job started in another tab stays out of this one, apart from saying the GPU is busy
+  if (state.running && current && state.session !== current) {
+    logBox.textContent = `The GPU is busy with a job in ${state.session || 'All clips'}. Your clips here are unaffected.`;
+  } else if ((state.log || state.running) && (!current || state.session === current)) {
     logBox.textContent = (state.running ? 'Running. Step-by-step progress is in the ComfyUI server window.\n' : '') + state.log.replace(/\{"\d+": \{"images".*$/m, '');
     logBox.classList.toggle('error', !state.running && state.code);
     logBox.scrollTop = logBox.scrollHeight;
   }
   if (wasRunning && !state.running) { loadClips(); loadSessions(); loadMemory(); clearReference(); }
   wasRunning = state.running;
-  if (state.running) setTimeout(poll, 3000);
+  clearTimeout(pollTimer);
+  if (state.running) pollTimer = setTimeout(poll, 3000);
 }
 
 function clipCard(clip) {
@@ -312,12 +325,33 @@ function clipCard(clip) {
   return card;
 }
 async function loadClips() {
-  const clips = await api('/api/clips');
+  const current = form.elements.session.value;
+  const clips = (await api('/api/clips')).filter(clip => !current || clip.session === current);
   document.getElementById('clips').replaceChildren(...clips.map(clipCard));
+  document.getElementById('clipsTitle').textContent = current ? `Clips in ${current}` : 'All clips';
 }
 async function loadSessions() {
   const names = await api('/api/sessions');
-  document.getElementById('sessions').replaceChildren(...names.map(n => Object.assign(document.createElement('option'), { value: n })));
+  const current = form.elements.session.value;
+  document.getElementById('tabs').replaceChildren(...['', ...names].map(name => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.textContent = name || 'All clips';
+    if (name === current) tab.setAttribute('aria-current', 'page');
+    tab.onclick = () => openSession(name);
+    return tab;
+  }));
+}
+function openSession(name) {
+  form.elements.session.value = name;
+  // nothing typed or chosen in one session should carry into another
+  form.elements.prompt.value = '';
+  form.elements.edit_latest.checked = false;
+  clearReference();
+  logBox.textContent = 'Ready.';
+  logBox.classList.remove('error');
+  try { localStorage.setItem('session', name); } catch {}
+  loadSessions(); loadClips(); loadMemory(); poll();
 }
 async function loadMemory() {
   const name = form.elements.session.value.trim();
@@ -347,7 +381,18 @@ form.addEventListener('submit', event => {
 document.getElementById('suggest').onclick = showSuggestions;
 document.getElementById('estimate').onclick = () => start(true);
 stop.onclick = () => api('/api/stop', {}).then(poll);
-form.elements.session.addEventListener('change', loadMemory);
+document.getElementById('newSession').addEventListener('submit', async event => {
+  event.preventDefault();
+  const input = document.getElementById('newName');
+  const name = input.value.trim();
+  if (!name) return;
+  try {
+    // an empty session is saved straight away, so its tab survives a reload
+    await api('/api/memory', { session: name });
+    input.value = '';
+    openSession(name);
+  } catch (error) { logBox.textContent = error.message; logBox.classList.add('error'); }
+});
 document.getElementById('addMemory').onclick = async () => {
   const input = document.getElementById('remember');
   try {
@@ -356,7 +401,12 @@ document.getElementById('addMemory').onclick = async () => {
     loadMemory();
   } catch (error) { logBox.textContent = error.message; logBox.classList.add('error'); }
 };
-loadClips(); loadSessions(); poll();
+(async () => {
+  let saved = '';
+  try { saved = localStorage.getItem('session') || ''; } catch {}
+  const names = await api('/api/sessions');
+  openSession(names.includes(saved) ? saved : '');
+})();
 </script>
 </body>
 </html>

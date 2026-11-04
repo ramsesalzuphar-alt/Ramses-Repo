@@ -22,6 +22,7 @@ MAX_UPLOAD = 2 * 1024**3
 VALUE_FIELDS = ("preset", "model", "width", "height", "seconds", "steps", "fps", "camera", "angle", "shot", "lens", "lighting", "style", "strength", "session", "video", "animate", "revise", "reference_query", "crf")
 FLAG_FIELDS = ("tiled", "upscale", "auto_reference", "estimate")
 job = None
+job_session = ""
 
 
 def build_command(form):
@@ -89,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
             if os.path.exists(JOB_LOG):
                 with open(JOB_LOG, encoding="utf-8", errors="replace") as f:
                     text = f.read()[-6000:]
-            return self.respond({"running": job_running(), "code": None if job is None else job.poll(), "log": text})
+            return self.respond({"running": job_running(), "code": None if job is None else job.poll(), "session": job_session, "log": text})
         if url.path == "/api/suggest":
             query = urllib.parse.parse_qs(url.query).get("q", [""])[0].strip()
             if not query:
@@ -134,7 +135,7 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(length) or b"{}")
 
     def do_POST(self):
-        global job
+        global job, job_session
         if not self.trusted():
             return self.respond({"error": "Not allowed"}, 403)
         url = urllib.parse.urlparse(self.path)
@@ -151,6 +152,7 @@ class Handler(BaseHTTPRequestHandler):
             log = open(JOB_LOG, "w", encoding="utf-8")
             job = subprocess.Popen(build_command(form), stdout=log, stderr=subprocess.STDOUT, cwd=HERE, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             log.close()
+            job_session = str(form.get("session") or "").strip()
             return self.respond({"started": True})
         if url.path == "/api/use-reference":
             video_id = str(form.get("id") or "")

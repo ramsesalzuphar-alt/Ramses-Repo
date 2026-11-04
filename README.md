@@ -5,8 +5,8 @@ Make videos locally with ComfyUI and open-source Wan 2.2 models, with no credits
 ## Wan Studio page
 
 Double-click `Start Wan Studio.bat` to start ComfyUI and the page, then bookmark `http://127.0.0.1:8190`. The
-bookmark only works while they're running. The page has the prompt, your settings, uploads, session memory, past
-clips and ratings.
+bookmark only works while they're running. The page has the prompt, your settings, uploads, past clips and ratings,
+with a tab for each session that keeps its own clips, edits and memory. All clips shows everything.
 
 ## Keeping the subject intact
 
