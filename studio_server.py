@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from yt_dlp.utils import DownloadError
 
 import generate_video as g
+import reference_images
 import reference_video
 import studio_chat
 
@@ -94,6 +95,14 @@ class Handler(BaseHTTPRequestHandler):
                 with open(JOB_LOG, encoding="utf-8", errors="replace") as f:
                     text = f.read()[-6000:]
             return self.respond({"running": job_running(), "code": None if job is None else job.poll(), "session": job_session, "log": text})
+        if url.path == "/api/images":
+            query = urllib.parse.parse_qs(url.query).get("q", [""])[0].strip()
+            if not query:
+                return self.respond({"error": "Enter a prompt first"}, 400)
+            try:
+                return self.respond(reference_images.search(query))
+            except (OSError, ValueError, KeyError) as error:
+                return self.respond({"error": f"Image search failed: {error}"}, 502)
         if url.path == "/api/suggest":
             query = urllib.parse.parse_qs(url.query).get("q", [""])[0].strip()
             if not query:
@@ -148,15 +157,29 @@ class Handler(BaseHTTPRequestHandler):
             form = self.read_json()
         except json.JSONDecodeError:
             return self.respond({"error": "Bad request"}, 400)
-        if url.path == "/api/generate":
+        if url.path in ("/api/generate", "/api/practice"):
             if job_running():
                 return self.respond({"error": "A generation is already running"}, 409)
+            if url.path == "/api/practice":
+                command = [sys.executable, os.path.join(HERE, "practice.py"), str(form.get("prompt") or "").strip().lstrip("- "), "--subject", str(form.get("subject") or ""), "--runs", str(form.get("runs") or 4)]
+                if str(form.get("query") or "").strip():
+                    command += ["--query", str(form["query"]).strip()]
+                if form.get("full_size"):
+                    command.append("--full-size")
+            else:
+                command = build_command(form)
             os.makedirs(os.path.dirname(JOB_LOG), exist_ok=True)
             log = open(JOB_LOG, "w", encoding="utf-8")
-            job = subprocess.Popen(build_command(form), stdout=log, stderr=subprocess.STDOUT, cwd=HERE, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            job = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, cwd=HERE, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             log.close()
             job_session = str(form.get("session") or "").strip()
             return self.respond({"started": True})
+        if url.path == "/api/use-image":
+            try:
+                path, info = reference_images.save(str(form.get("id") or ""), UPLOADS)
+                return self.respond({"path": path, **info})
+            except (OSError, ValueError, KeyError) as error:
+                return self.respond({"error": f"Could not save that image: {error}"}, 502)
         if url.path == "/api/use-reference":
             video_id = str(form.get("id") or "")
             # only YouTube's own 11-character ids, so this can't be pointed at other addresses
@@ -183,7 +206,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond({"error": f"The local chat model didn't answer. Check that Ollama is running. ({error})"}, 503)
         if url.path == "/api/stop":
             if job_running():
-                job.terminate()
+                # the whole tree, because multiple tries and practice run their clips as child processes
+                subprocess.run(["taskkill", "/PID", str(job.pid), "/T", "/F"], capture_output=True)
                 urllib.request.urlopen(urllib.request.Request(g.SERVER + "/interrupt", data=b"{}", headers={"Content-Type": "application/json"}), timeout=5)
             return self.respond({"stopped": True})
         if url.path == "/api/rate":

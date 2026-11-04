@@ -20,6 +20,12 @@ at 704x480. The look comes from the image, so a prompt can't change an outfit: u
 needs `wan_animate_2_distill_int8_convrot.safetensors`, `clip_vision_h.safetensors` and `Wan2_1_VAE_bf16.safetensors`
 from Comfy-Org's `Wan-Animate-2` on Hugging Face.
 
+## Practice
+
+`practice.py "prompt" --subject image.png --runs 4` finds YouTube clips, skips ones with scene cuts or little movement,
+never reuses a clip from earlier practice, makes a small Animate clip from each, and ranks them. It waits if the GPU
+goes above 85 C. Reports are in `~/ComfyUI/output/practice`. The scores are rough, and the model doesn't change.
+
 ## Sessions
 
 `--session NAME` saves your scene and clips in `~/ComfyUI/output/sessions`, so nothing you asked for gets lost.

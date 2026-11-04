@@ -171,7 +171,7 @@ def use_video_input(workflow, filename, frames, fps, width, height, strength):
     workflow["10"]["inputs"]["fps"] = fps
 
 
-def build_animate_workflow(prompt, image, video, frames, fps, width, height, seed):
+def build_animate_workflow(prompt, image, video, frames, fps, width, height, seed, pose_strength=1.0):
     """Wan Animate 2 distilled, following ComfyUI's template, with the cache in RAM for small GPUs."""
     scale = lambda source: {"class_type": "ImageScale", "inputs": {"image": source, "upscale_method": "area", "width": width, "height": height, "crop": "center"}}
     encode = lambda text: {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": text}}
@@ -200,7 +200,7 @@ def build_animate_workflow(prompt, image, video, frames, fps, width, height, see
         "21": encode(prompt),
         "22": {"class_type": "WanAnimate2ToVideo", "inputs": {
             "positive": ["4", 0], "negative": ["5", 0], "vae": ["7", 0], "width": width, "height": height, "length": frames, "batch_size": 1,
-            "video_frame_offset": 0, "pose_strength": 1.0, "pose_start_percent": 0.0, "pose_end_percent": 1.0, "reference_image_strength": 1.0,
+            "video_frame_offset": 0, "pose_strength": pose_strength, "pose_start_percent": 0.0, "pose_end_percent": 1.0, "reference_image_strength": 1.0,
             "reference_image": ["13", 0], "pose_video": ["17", 0], "clip_vision_output": ["18", 0], "positive_pose": ["21", 0], "clip_vision_output_pose": ["20", 0]}},
         "23": {"class_type": "SamplerCustom", "inputs": {
             "model": ["8", 0], "add_noise": True, "noise_seed": seed, "cfg": 1.0, "positive": ["22", 0], "negative": ["22", 1],
@@ -406,6 +406,7 @@ def main():
     parser.add_argument("--remember", action="append", default=[], metavar="KEY=VALUE", help="save or replace an instruction, such as outfit=red t-shirt")
     parser.add_argument("--forget", action="append", default=[], metavar="KEY", help="remove a saved instruction")
     parser.add_argument("--memory", action="store_true", help="show what the session remembers, then stop")
+    parser.add_argument("--pose-strength", type=float, default=1.0, help="how closely Animate copies the motion: 1.0 is normal")
     parser.add_argument("--animate", metavar="IMAGE", help="animate the subject in this image with the motion from --video, using Wan Animate")
     if "--best" in sys.argv:
         # as defaults, so any option typed explicitly still wins
@@ -517,7 +518,7 @@ def main():
             shutil.copyfile(args.animate, os.path.join(COMFY_INPUT, image))
         filename, frames, fps = prepare_video(args.video, args.seconds, FPS_14B)
         args.model, args.steps = "animate", ANIMATE_STEPS
-        workflow = build_animate_workflow(args.prompt, image, filename, frames, fps, args.width, args.height, seed)
+        workflow = build_animate_workflow(args.prompt, image, filename, frames, fps, args.width, args.height, seed, args.pose_strength)
     else:
         workflow = build_workflow(args.prompt, args.width, args.height, args.seconds, args.steps, seed)
         if args.model == "14b":

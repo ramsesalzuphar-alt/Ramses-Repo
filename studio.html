@@ -121,10 +121,26 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); bor
 
     <h2>Keep the subject and copy motion (Animate)</h2>
     <label>Subject image <input name="animate_file" type="file" accept="image/*"></label>
+    <div class="row" style="margin-bottom: 8px"><button type="button" id="findImages">Find openly licensed images</button></div>
+    <div class="suggestions" id="imageResults"></div>
+    <p class="hint" id="chosenImage" hidden></p>
     <label>Motion or reference video <input name="video_file" type="file" accept="video/*"></label>
     <p class="hint">Both together use Wan Animate, about 3 minutes at 704×480. The look comes from the image, so to change an outfit, use a new image. A video alone reworks that clip.</p>
     <label class="check"><input type="checkbox" name="auto_reference"> Find a YouTube reference automatically</label>
     <p class="hint">Downloading may break the site's terms, and clips stay their owners' copyright. Automatic picks are often poor matches, so keep results private.</p>
+
+    <h2>Practise on its own</h2>
+    <p class="hint">Uses your prompt and subject image above. It finds YouTube clips, skips unusable ones, makes a small Animate clip from each, and ranks them in a Practice tab. This improves which references and settings you use, not the model. Clips stay their owners' copyright and downloading may break the site's terms, so keep results private.</p>
+    <div class="grid">
+      <label>Clips to make, about 3 minutes each
+        <input id="practiceRuns" type="number" min="1" max="20" value="4">
+      </label>
+      <label>Search words, optional
+        <input id="practiceQuery" placeholder="woman running full body side view">
+      </label>
+    </div>
+    <label class="check"><input type="checkbox" id="practiceFull"> Then remake the top pick at full size, about 25 minutes more</label>
+    <div class="row" style="margin-bottom: 14px"><button type="button" id="practice">Start practice</button></div>
 
     <div id="suggestBox" hidden>
       <h2>Suggested references</h2>
@@ -192,6 +208,7 @@ const upload = async file => {
   return data.path;
 };
 
+let chosenSubject = null;
 let chosenReference = null;
 let suggestedFor = null;
 
@@ -287,10 +304,12 @@ async function collect() {
   const image = form.elements.animate_file.files[0];
   const video = form.elements.video_file.files[0];
   if (chosenReference && !video) body.video = chosenReference;
+  if ((image || chosenSubject) && !video && !chosenReference && !data.edit_latest && !data.auto_reference) throw new Error('A subject image also needs a motion video.');
   if (image) {
-    if (!video && !chosenReference && !data.edit_latest && !data.auto_reference) throw new Error('A subject image also needs a motion video.');
     logBox.textContent = 'Uploading image...';
     body.animate = await upload(image);
+  } else if (chosenSubject) {
+    body.animate = chosenSubject;
   }
   if (video) {
     logBox.textContent = 'Uploading video...';
@@ -511,6 +530,68 @@ form.addEventListener('submit', event => {
   start(false);
 });
 document.getElementById('suggest').onclick = showSuggestions;
+document.getElementById('findImages').onclick = async () => {
+  const list = document.getElementById('imageResults');
+  logBox.classList.remove('error');
+  logBox.textContent = 'Searching for images...';
+  try {
+    const results = await api('/api/images?q=' + encodeURIComponent(form.elements.prompt.value.trim()));
+    list.replaceChildren(...results.map(item => {
+      const card = document.createElement('div');
+      card.className = 'suggestion';
+      const picture = document.createElement('img');
+      picture.src = item.thumbnail;
+      picture.alt = '';
+      picture.loading = 'lazy';
+      const text = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = item.title;
+      const details = document.createElement('span');
+      details.textContent = `${item.creator}, ${item.license}`;
+      const use = document.createElement('button');
+      use.type = 'button';
+      use.textContent = 'Use as subject';
+      use.onclick = async () => {
+        use.disabled = true;
+        try {
+          const saved = await api('/api/use-image', { id: item.id });
+          chosenSubject = saved.path;
+          const chosen = document.getElementById('chosenImage');
+          chosen.hidden = false;
+          chosen.textContent = `Subject: ${item.title} by ${item.creator}, ${item.license}. Check this license, and credit the creator if you share the video.`;
+          list.replaceChildren();
+          logBox.textContent = 'Subject image ready.';
+        } catch (error) {
+          use.disabled = false;
+          logBox.textContent = error.message;
+          logBox.classList.add('error');
+        }
+      };
+      const page = document.createElement('a');
+      page.href = item.page || '#';
+      page.target = '_blank';
+      page.rel = 'noopener';
+      page.textContent = 'Source';
+      text.append(title, details, use, page);
+      card.append(picture, text);
+      return card;
+    }));
+    logBox.textContent = results.length ? 'Pick a subject image.' : 'No images found. Try different words.';
+  } catch (error) { logBox.textContent = error.message; logBox.classList.add('error'); }
+};
+document.getElementById('practice').onclick = async () => {
+  const prompt = form.elements.prompt.value.trim();
+  const image = form.elements.animate_file.files[0];
+  logBox.classList.remove('error');
+  try {
+    if (!prompt || !(image || chosenSubject)) throw new Error('Practice needs a prompt and a subject image.');
+    logBox.textContent = 'Preparing...';
+    const subject = image ? await upload(image) : chosenSubject;
+    await api('/api/memory', { session: 'practice' });
+    await api('/api/practice', { prompt, subject, runs: document.getElementById('practiceRuns').value, query: document.getElementById('practiceQuery').value, full_size: document.getElementById('practiceFull').checked, session: 'practice' });
+    openSession('practice');
+  } catch (error) { logBox.textContent = error.message; logBox.classList.add('error'); }
+};
 document.getElementById('joinFilm').onclick = async () => {
   // newest clips are listed first, so reverse to cut them in the order they were made
   const join = [...document.querySelectorAll('.joinPick:checked')].map(box => box.value).reverse();
