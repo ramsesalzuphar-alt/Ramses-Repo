@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Progress · Wan Studio</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; max-width: 760px; padding: 32px 20px 48px; font: 16px/1.5 system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 1.6rem; }
+  h2 { margin: 28px 0 10px; font-size: 1.05rem; }
+  .muted { opacity: .7; margin: 0; }
+  .item { padding: 12px 14px; margin-bottom: 10px; border: 1px solid #8884; border-radius: 10px; }
+  .title { font-weight: 600; overflow-wrap: anywhere; }
+  .meta { opacity: .75; font-size: .92rem; }
+  progress { width: 100%; height: 14px; margin-top: 8px; accent-color: #2f6fed; }
+  .empty { opacity: .6; font-style: italic; }
+  .error { color: #d33; }
+</style>
+</head>
+<body>
+  <h1>Progress</h1>
+  <p class="muted" id="updated" role="status">Loading…</p>
+
+  <h2>Generating now (ComfyUI)</h2>
+  <div id="comfy"></div>
+  <h2>Scripts running, from any session</h2>
+  <div id="scripts"></div>
+  <h2>Downloads</h2>
+  <div id="downloads"></div>
+  <h2>Graphics card</h2>
+  <div id="gpu"></div>
+  <p class="muted">Claude Code sessions themselves aren't shown, only the video jobs and downloads they start. This page only watches, so it's safe to keep open.</p>
+<script>
+const $ = id => document.getElementById(id);
+
+function time(seconds) {
+  if (seconds == null) return '';
+  const m = Math.floor(seconds / 60), s = seconds % 60;
+  return m ? `${m} min ${s} s` : `${s} s`;
+}
+
+// Text from prompts and file names is only ever set as text, never as HTML.
+function item(title, meta, value, max) {
+  const box = document.createElement('div');
+  box.className = 'item';
+  const t = document.createElement('div');
+  t.className = 'title';
+  t.textContent = title;
+  const m = document.createElement('div');
+  m.className = 'meta';
+  m.textContent = meta;
+  box.append(t, m);
+  if (max) {
+    const bar = document.createElement('progress');
+    bar.max = max;
+    bar.value = value;
+    bar.setAttribute('aria-label', `${title}: ${value} of ${max}`);
+    box.append(bar);
+  }
+  return box;
+}
+
+function fill(id, items, emptyText) {
+  $(id).replaceChildren(...(items.length ? items : [Object.assign(document.createElement('p'), { className: 'empty', textContent: emptyText })]));
+}
+
+async function refresh() {
+  try {
+    const data = await (await fetch('/api/progress')).json();
+    $('updated').textContent = `Updated ${data.time}, every 3 seconds`;
+    $('updated').className = 'muted';
+
+    if (data.comfy === null) fill('comfy', [], 'ComfyUI is not running.');
+    else fill('comfy', data.comfy.map(job => {
+      if (job.state === 'queued') return item(job.prompt || 'Queued job', 'Waiting in the queue');
+      const parts = [job.elapsed != null ? `running ${time(job.elapsed)}` : 'running'];
+      if (job.steps) parts.push(`${job.stage || 'step'} ${job.step} of ${job.steps}`);
+      if (job.stage_left != null) parts.push(`about ${time(job.stage_left)} left in this stage`);
+      return item(job.prompt || 'Running job', parts.join(' · '), job.step || 0, job.steps || 0);
+    }), 'Nothing generating.');
+
+    const scripts = data.scripts.map(s => item(`${s.kind}: ${s.detail || 'no prompt'}`, `running ${time(s.elapsed)}`));
+    if (data.studio) scripts.unshift(item(`Studio page job${data.studio.session ? ', session ' + data.studio.session : ''}`, 'running'));
+    fill('scripts', scripts, 'No generator scripts running.');
+
+    fill('downloads', data.downloads.map(d => item(d.name, `${d.mb} MB so far${d.mb_per_s != null ? `, ${d.mb_per_s} MB/s` : ''}`)), 'No downloads in progress.');
+
+    const g = data.gpu;
+    fill('gpu', g ? [
+      item('Load', `${g.load}%`, g.load, 100),
+      item('Memory', `${g.memory_gb} of ${g.memory_total_gb} GB, ${g.temperature} °C`, g.memory_gb, g.memory_total_gb),
+    ] : [], 'Graphics card stats unavailable.');
+  } catch {
+    $('updated').textContent = 'Lost touch with the Studio server. Start it with Start Wan Studio.bat.';
+    $('updated').className = 'error';
+  }
+}
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

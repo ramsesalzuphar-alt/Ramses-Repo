@@ -30,7 +30,16 @@ COMFY_INPUT = os.path.expanduser("~/ComfyUI/input")
 HISTORY = os.path.expanduser("~/ComfyUI/output/history.jsonl")
 OUTPUT_VIDEO = os.path.expanduser("~/ComfyUI/output/video")
 SESSIONS = os.path.expanduser("~/ComfyUI/output/sessions")
-SETTINGS = ("model", "width", "height", "steps", "crf", "tiled", "upscale", "smooth", "fps")
+SETTINGS = ("model", "width", "height", "steps", "crf", "tiled", "upscale", "smooth", "fps", "fast")
+# step-distilled add-on for the 5B model, from hum-ma/Wan2.2-TI2V-5B-Turbo-GGUF on Hugging Face
+TURBO_LORA = "Wan22_TI2V_5B_Turbo_lora_rank_64_fp16.safetensors"
+FAST_STEPS = 4
+# a reference graded against itself is 1.0 and an unrelated clip about 0. On a frisbee test, 20 steps at strength 0.6
+# gave 0.86 and kept the prompt's dog; 0.3 gave 0.91 but kept the reference's dog; --fast at 0.6 gave only 0.51
+MOTION_TARGET = 0.85
+MOTION_STEP = 0.15
+MOTION_ATTEMPTS = 3
+MIN_STRENGTH = 0.25
 PRESETS = {
     "draft": {"model": "5b", "width": 704, "height": 480, "steps": 20, "tiled": True},
     "balanced": {"model": "14b", "width": 704, "height": 480, "steps": 20, "tiled": True, "crf": 12.0, "fps": 48},
@@ -96,6 +105,13 @@ def build_workflow(prompt, width, height, seconds, steps, seed):
         "10": {"class_type": "CreateVideo", "inputs": {"images": ["9", 0], "fps": float(FPS)}},
         "11": {"class_type": "SaveVideo", "inputs": {"video": ["10", 0], "filename_prefix": "video/wan", "format": "auto", "format.codec": "auto"}},
     }
+
+
+def use_turbo(workflow):
+    """Load the Turbo add-on into the 5B model. It's trained to need no guidance, so cfg is 1."""
+    workflow["19"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["1", 0], "lora_name": TURBO_LORA, "strength_model": 1.0}}
+    workflow["2"]["inputs"]["model"] = ["19", 0]
+    workflow["8"]["inputs"]["cfg"] = 1.0
 
 
 def use_14b_model(workflow, width, height, seconds, steps, seed):
@@ -339,25 +355,72 @@ def best_settings(entries):
     return {**settings, "smooth": True}
 
 
-def rate_clip(filename, score):
-    if score not in ("1", "2", "3", "4", "5"):
-        sys.exit("Rating must be a whole number from 1 to 5")
+def update_entry(filename, fields):
     entries = load_history()
     matches = [e for e in entries if e["file"] == filename]
     if not matches:
         sys.exit(f"{filename} isn't in the history")
-    matches[-1]["rating"] = int(score)
+    matches[-1].update(fields)
     # write then swap, so a crash can't lose the log
     with open(HISTORY + ".tmp", "w", encoding="utf-8") as f:
         f.writelines(json.dumps(e) + "\n" for e in entries)
     os.replace(HISTORY + ".tmp", HISTORY)
+
+
+def rate_clip(filename, score):
+    if score not in ("1", "2", "3", "4", "5"):
+        sys.exit("Rating must be a whole number from 1 to 5")
+    update_entry(filename, {"rating": int(score)})
     print(f"Rated {filename} {score}/5")
+
+
+def drop_options(argv, flags, valued):
+    """argv without the given on/off flags and the given options with their values, in either --x v or --x=v form."""
+    kept, skip = [], False
+    for item in argv:
+        if skip:
+            skip = False
+        elif item in flags or item.split("=")[0] in valued and "=" in item:
+            continue
+        elif item in valued:
+            skip = True
+        else:
+            kept.append(item)
+    return kept
+
+
+def match_motion(args):
+    """Remake the clip from args.video at lower strengths until its motion follows the reference; grade every attempt."""
+    import grade_video
+    child = drop_options(sys.argv[1:], {"--match-motion", "--auto-reference"}, {"--reference-query", "--strength", "--video"})
+    strengths = [round(args.strength - MOTION_STEP * n, 2) for n in range(MOTION_ATTEMPTS)]
+    # grade against the copy the generator actually uses: its frame rate matches the result's, while the original's
+    # differs, and on shaky footage that alone moved the score from 1.0 to about 0.65
+    graded_against = os.path.join(COMFY_INPUT, prepare_video(args.video, args.seconds, FPS_14B if args.model == "14b" else FPS)[0])
+    attempts = []
+    for number, strength in enumerate(s for s in strengths if s >= MIN_STRENGTH):
+        print(f"=== Attempt {number + 1}, strength {strength}", flush=True)
+        if subprocess.run([sys.executable, os.path.abspath(__file__), *child, "--video", args.video, "--strength", str(strength)]).returncode:
+            sys.exit("Generation failed, so stopping")
+        clip = load_history()[-1]["file"]
+        grades = grade_video.grade(os.path.join(OUTPUT_VIDEO, clip), graded_against)
+        update_entry(clip, grades)
+        attempts.append({"file": clip, "strength": strength, **grades})
+        print(f'Motion match {grades["motion_match"]:.2f}, steadiness {grades["steadiness"]:.2f}', flush=True)
+        if grades["motion_match"] >= MOTION_TARGET:
+            break
+    print("\nGRADES, motion match first. Steadiness compares frame-to-frame consistency with the real reference, 1 being as steady:")
+    for a in attempts:
+        print(f'{a["file"]}  strength {a["strength"]}  motion match {a["motion_match"]:.2f}  steadiness {a["steadiness"]:.2f}')
+    best = max(attempts, key=lambda a: (a["motion_match"] >= MOTION_TARGET, a["motion_match"] + a["steadiness"]))
+    note = "" if best["motion_match"] >= MOTION_TARGET else f", though no attempt reached a motion match of {MOTION_TARGET}"
+    print(f'Best: {best["file"]}{note}')
 
 
 def show_history():
     for e in load_history():
         s = e["settings"]
-        extras = [name for name in ("tiled", "upscale", "smooth") if s.get(name)]
+        extras = [name for name in ("tiled", "upscale", "smooth", "fast") if s.get(name)]
         print(f'{e["file"]}  {e.get("rating", "-")}/5  {e["minutes"]} min  {s["model"]} {s["width"]}x{s["height"]} {s["steps"]} steps {" ".join(extras)}  {e["prompt"][:50]}')
 
 
@@ -382,7 +445,9 @@ def main():
     parser.add_argument("--seed", type=int, help="repeat a clip's randomness; random by default")
     parser.add_argument("--revise", metavar="FILE", help="develop a logged clip, or 'latest' in a session: the prompt is your change, and its settings and seed are kept")
     parser.add_argument("--auto-reference", action="store_true", help="find a YouTube clip matching the prompt and use it as --video")
-    parser.add_argument("--reference-query", help="search words for --auto-reference, instead of the prompt")
+    parser.add_argument("--reference-query", help="search words for --auto-reference, instead of ones picked from the prompt")
+    parser.add_argument("--fast", action="store_true", help=f"5b only: the Turbo add-on makes a clip in {FAST_STEPS} steps, about 3x faster")
+    parser.add_argument("--match-motion", action="store_true", help=f"remake at lower strengths until the motion matches the reference, up to {MOTION_ATTEMPTS} tries, grading each")
     parser.add_argument("--tiled", action="store_true", help="decode in pieces: less memory, small risk of seams")
     parser.add_argument("--upscale", action="store_true", help="double the resolution with RealESRGAN")
     parser.add_argument("--smooth", action=argparse.BooleanOptionalAction, help="raise the frame rate to about 48 fps with RIFE; on by default for 14b")
@@ -497,9 +562,19 @@ def main():
         if args.video:
             sys.exit("--auto-reference can't be combined with --video or --revise")
         import reference_video
-        args.video = reference_video.find_reference(args.reference_query or " ".join(args.prompt.split()[:12]), args.seconds + 1)
+        args.video = reference_video.find_reference(args.reference_query or reference_video.search_words(args.prompt), args.seconds + 1)
     if not 0 < args.strength <= 1:
         sys.exit("--strength must be above 0 and at most 1")
+    if args.fast:
+        if args.model != "5b" or args.animate:
+            sys.exit("--fast only works with the 5b model, and Animate is already fast")
+        if not os.path.isfile(os.path.expanduser(f"~/ComfyUI/models/loras/{TURBO_LORA}")):
+            sys.exit(f"--fast needs {TURBO_LORA} in ~/ComfyUI/models/loras, from hum-ma/Wan2.2-TI2V-5B-Turbo-GGUF on Hugging Face")
+        args.steps = FAST_STEPS
+    if args.match_motion:
+        if not args.video or args.animate or revise_file or args.session or args.tries > 1:
+            sys.exit("--match-motion needs --video or --auto-reference, and can't be used with --animate, --revise, --session or --tries")
+        return match_motion(args)
 
     # Block idle sleep while this process runs; ES_CONTINUOUS | ES_SYSTEM_REQUIRED
     ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
@@ -523,6 +598,8 @@ def main():
         workflow = build_workflow(args.prompt, args.width, args.height, args.seconds, args.steps, seed)
         if args.model == "14b":
             use_14b_model(workflow, args.width, args.height, args.seconds, args.steps, seed)
+        if args.fast:
+            use_turbo(workflow)
         if args.video:
             filename, frames, fps = prepare_video(args.video, args.seconds, FPS_14B if args.model == "14b" else FPS)
             use_video_input(workflow, filename, frames, fps, args.width, args.height, args.strength)
@@ -593,6 +670,10 @@ if __name__ == "__main__":
     use_14b_model(low, 640, 352, 2, 20, 1)
     apply_strength_14b(low, 0.3)
     assert "8" not in low and low["18"]["inputs"]["start_at_step"] == 14 and low["18"]["inputs"]["latent_image"] == ["7", 0]
+    turbo = build_workflow("p", 640, 352, 2, FAST_STEPS, 1)
+    use_turbo(turbo)
+    assert turbo["2"]["inputs"]["model"] == ["19", 0] and turbo["19"]["inputs"]["model"] == ["1", 0] and turbo["8"]["inputs"]["cfg"] == 1.0
+    assert drop_options(["p", "--match-motion", "--strength", "0.6", "--fast", "--video=a.mp4", "--seconds", "2"], {"--match-motion"}, {"--strength", "--video"}) == ["p", "--fast", "--seconds", "2"]
     assert best_settings([]) == BEST_PRESET
     assert best_settings([{"rating": 3, "settings": {"steps": 1}}]) == BEST_PRESET
     assert best_settings([{"rating": 5, "settings": {"steps": 1}}, {"rating": 5, "settings": {"steps": 2}}, {"settings": {"steps": 3}}]) == {"steps": 2, "smooth": True}

@@ -97,6 +97,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); bor
       <label>Versions to try <input name="tries" type="number" min="1" max="10" value="1"></label>
       <label class="check" style="align-self: end"><input type="checkbox" name="final"> Add film finish</label>
       <label class="check"><input type="checkbox" name="upscale"> Double the size</label>
+      <label class="check"><input type="checkbox" name="fast"> Fast, about 3× quicker (Draft or 5B only)</label>
       <span></span>
       <label>Width <input name="width" type="number" min="256" max="1920" step="16" placeholder="From demand"></label>
       <label>Height <input name="height" type="number" min="256" max="1920" step="16" placeholder="From demand"></label>
@@ -295,6 +296,7 @@ async function collect() {
   body.tries = data.tries;
   body.final = !!data.final;
   body.upscale = !!data.upscale;
+  body.fast = !!data.fast;
   body.auto_reference = !!data.auto_reference;
   if (data.edit_latest) {
     if (!data.session) throw new Error('Open or create a session tab to edit its latest clip.');

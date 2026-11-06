@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from yt_dlp.utils import DownloadError
 
 import generate_video as g
+import progress_watch
 import reference_images
 import reference_video
 import studio_chat
@@ -22,7 +23,7 @@ JOB_LOG = os.path.join(os.path.expanduser("~/ComfyUI/output"), "studio_job.log")
 MAX_UPLOAD = 2 * 1024**3
 # form fields passed straight to generate_video.py as --name value
 VALUE_FIELDS = ("preset", "model", "width", "height", "seconds", "steps", "fps", "camera", "angle", "shot", "lens", "lighting", "style", "strength", "session", "video", "animate", "revise", "reference_query", "crf", "tries", "music")
-FLAG_FIELDS = ("tiled", "upscale", "auto_reference", "estimate", "final")
+FLAG_FIELDS = ("tiled", "upscale", "auto_reference", "estimate", "final", "fast")
 job = None
 job_session = ""
 
@@ -79,6 +80,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/":
             with open(os.path.join(HERE, "studio.html"), "rb") as f:
                 return self.respond(f.read(), content_type="text/html; charset=utf-8")
+        if url.path == "/progress":
+            with open(os.path.join(HERE, "progress.html"), "rb") as f:
+                return self.respond(f.read(), content_type="text/html; charset=utf-8")
+        if url.path == "/api/progress":
+            studio = {"session": job_session, "elapsed": None} if job_running() else None
+            return self.respond(progress_watch.snapshot(studio))
         if url.path == "/api/clips":
             return self.respond(list(reversed(g.load_history())))
         if url.path == "/api/sessions":
@@ -247,5 +254,6 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     command = build_command({"prompt": " p ", "preset": "draft", "tiled": True, "lens": "", "remember": ["a=b"]})
     assert command[2:] == ["p", "--preset", "draft", "--tiled", "--remember", "a=b"]
-    print(f"Open http://{HOST}:{PORT}")
+    print(f"Open http://{HOST}:{PORT}, or http://{HOST}:{PORT}/progress for progress")
+    progress_watch.watch_comfy()
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

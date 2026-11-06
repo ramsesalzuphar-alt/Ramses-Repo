@@ -7,6 +7,7 @@ This finds better references and settings. It doesn't train the model, which is 
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -17,7 +18,9 @@ import torch
 from PIL import Image
 
 import generate_video as g
+import motion_check
 import reference_video
+from reference_video import frame_changes, gray_frames, usable_reference
 
 REPORTS = os.path.expanduser("~/ComfyUI/output/practice")
 MAX_RUNS = 20
@@ -26,36 +29,8 @@ POSE_STRENGTHS = (1.0, 0.8)
 detector = None
 
 
-def gray_frames(path, limit=200):
-    with av.open(path) as container:
-        frames = []
-        for frame in container.decode(video=0):
-            frames.append(frame.to_ndarray(format="gray").astype(np.int16))
-            if len(frames) >= limit:
-                break
-    return frames
-
-
-def frame_changes(frames):
-    return np.array([np.abs(frames[i + 1] - frames[i]).mean() for i in range(len(frames) - 1)])
-
-
-def usable_reference(path):
-    """Reject clips with a scene cut, or with too little movement to copy."""
-    frames = gray_frames(path)
-    if len(frames) < 10:
-        return False, "too short"
-    changes = frame_changes(frames)
-    median = float(np.median(changes))
-    if median < 1.0:
-        return False, "too little movement"
-    if changes.max() > max(median * 5, 25):
-        return False, "has a scene cut"
-    return True, "ok"
-
-
 def score_parts(frames, subject_rgb, last_rgb):
-    """Scores from 0 to 1. Rough measures: they can't see a plastic-looking face or odd motion."""
+    """Scores from 0 to 1. Rough measures: they can't see a plastic-looking face, and movement is checked separately by motion_check."""
     if frames[len(frames) // 2].std() < 5:
         return {"score": 0.0, "steadiness": 0.0, "sharpness": 0.0, "subject_match": 0.0}
     changes = frame_changes(frames)
@@ -104,6 +79,11 @@ def score_clip(path, subject):
     return {**parts, "score": round(parts["score"] * presence**2, 3), "person_in_frame": presence, "subject_left": presence < 1}
 
 
+def title_match(title, query):
+    words = set(re.findall(r"[a-z]+", (title or "").lower()))
+    return sum(word in words or word.rstrip("s") in words for word in re.findall(r"[a-z]+", query.lower()))
+
+
 def used_references():
     used = set()
     if os.path.isdir(REPORTS):
@@ -137,10 +117,13 @@ def main():
     if not os.path.isfile(args.subject):
         sys.exit(f"Subject image not found: {args.subject}")
 
-    query = args.query or " ".join(args.prompt.split()[:12])
+    query = args.query or reference_video.search_words(args.prompt)
     used = used_references()
     print(f"Searching YouTube: {query}", flush=True)
     candidates = [v for v in reference_video.search(query, 30) if 5 <= (v.get("duration") or 0) <= 600 and v["id"] not in used]
+    # titles that share the most search words first, so a jogging prompt gets jogging footage rather than a race final
+    candidates.sort(key=lambda v: -title_match(v.get("title"), query))
+    candidates = [v for v in candidates if title_match(v.get("title"), query) >= min(2, len(query.split()))]  # drops songs that share one word
     print(f"{len(candidates)} new candidates, up to {args.runs} runs", flush=True)
 
     runs = []
@@ -157,6 +140,12 @@ def main():
             print(f'Skipped {video["id"]}: {error}', flush=True)
             continue
         ok, reason = usable_reference(reference)
+        if ok:
+            track = motion_check.pose_track(reference)
+            if track is None:
+                ok, reason = False, "no single clear person to copy"
+            elif not motion_check.legs_move(motion_check.features(track)):
+                ok, reason = False, "the person is standing, not moving"
         if not ok:
             print(f'Skipped "{video.get("title")}": {reason}', flush=True)
             continue
@@ -170,6 +159,11 @@ def main():
             continue
         clip = g.load_history()[-1]["file"]
         parts = score_clip(os.path.join(g.OUTPUT_VIDEO, clip), args.subject)
+        motion = motion_check.check(os.path.join(g.OUTPUT_VIDEO, clip))
+        if motion["natural"] is not None:
+            parts["score"] = round(parts["score"] * (0.4 + 0.6 * motion["natural"]), 3)  # unnatural movement sinks a clip
+        print(f'Movement: {motion["natural"] if motion["natural"] is not None else "not measured"}  {"; ".join(motion["notes"])}', flush=True)
+        parts["natural_motion"], parts["motion_notes"] = motion["natural"], motion["notes"]
         runs.append({"clip": clip, "reference": reference, "reference_id": video["id"], "reference_title": video.get("title"), "reference_url": url, "pose_strength": pose_strength, **parts})
         # after every run, so stopping early keeps what's finished
         with open(report + ".tmp", "w", encoding="utf-8") as f:
@@ -180,6 +174,7 @@ def main():
     print("\nRESULTS, best measured first. These measures are rough, so please watch them:")
     for run in runs:
         flag = "  (subject may leave the frame)" if run.get("subject_left") else ""
+        flag += "".join(f"  ({note})" for note in run.get("motion_notes", []))
         print(f'{run["score"]:.2f}  {run["clip"]}  motion {run["pose_strength"]}  {run["reference_title"]}  {run["reference_url"]}{flag}')
     if not runs:
         print("No clips were made. Try different search words.")
@@ -200,4 +195,6 @@ if __name__ == "__main__":
     rgb = np.random.default_rng(2).integers(0, 255, (16, 16, 3))
     jumpy = smooth[:6] + [noise[::-1] for _ in range(6)]
     assert score_parts(smooth, rgb, rgb)["steadiness"] > score_parts(jumpy, rgb, rgb)["steadiness"]
+    assert title_match("Woman Jogging on a Coastal Road", "woman jogging coastal road") == 4
+    assert title_match("Women's 100mH Final | Paris", "woman jogging coastal road") == 0
     main()
