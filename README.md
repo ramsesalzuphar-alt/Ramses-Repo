@@ -64,7 +64,9 @@ It picks the CMU take whose description best matches the prompt's action (from a
 punch, salsa), renders it as depth in Blender, makes a quick Wan 5B clip of the prompt and takes its clearest whole-body
 frame as the subject's look, then runs VACE 14B and reviews the result. Long takes are cut to their busiest stretch; a
 body that stays in place gets a still camera in front. Prompts with no matching human action use plain Wan 14B.
-About 1 hour at 832x480, or 4 hours with `--full` (1280x704). `--pick-only` shows the chosen motion. The `vace-video`
+To avoid interpolation smearing fast limbs, the motion is made at half speed and played back at 32 fps, so every frame
+is a real one; Wan's 81-frame limit makes that 2.5 seconds at most. About 2 hours at 832x480, or about 7 with `--full`
+(1280x704). `--pick-only` shows the chosen motion. The `vace-video`
 skill runs it from a plain prompt.
 
 ## Sessions
@@ -100,7 +102,7 @@ Model files go in `~/ComfyUI/models`:
 | `wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors` | `diffusion_models` | `--model 14b` |
 | `wan_2.1_vae.safetensors` | `vae` | `--model 14b` |
 | `RealESRGAN_x4plus.safetensors` | `upscale_models` | `--upscale` |
-| `rife_v4.26.safetensors` | `frame_interpolation` | `--smooth` |
+| `film_net_fp16.safetensors` (Comfy-Org/Frame-Interpolation) | `frame_interpolation` | `--smooth` |
 
 The Wan files are from Comfy-Org's `Wan_2.2_ComfyUI_Repackaged` on Hugging Face, the upscaler from
 `Real-ESRGAN_repackaged`, and the smoothing model from `frame_interpolation`.

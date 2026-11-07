@@ -15,9 +15,9 @@ The user gives a prompt. If it's missing, ask for it. Don't ask about anything e
    cd /c/wan-video-studio && PYTHONIOENCODING=utf-8 ~/ComfyUI/venv/Scripts/python.exe auto_vace.py "<prompt>" 2>&1 | grep -v '^{"\|Warning' | tail -n 30
    ```
 
-   It takes about 1 hour at 832x480. Only change these if the user asks:
-   - `--full` for 1280x704: much sharper, about 4 hours.
-   - `--seconds N`: the default is 3.
+   It takes about 2 hours at 832x480. Only change these if the user asks:
+   - `--full` for 1280x704: much sharper, about 7 hours.
+   - `--seconds N`: the default and longest is 2.5 (made at 32 real frames a second).
    - `--take 61_01` for a specific CMU motion, `--subject IMAGE` for their own picture of the subject.
    - `--pick-only` shows which motion it would use, in seconds, without making anything.
 

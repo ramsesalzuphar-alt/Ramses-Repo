@@ -1,6 +1,6 @@
 """Render a motion-capture clip as a plain figure with a side-on tracking camera, to use as an Animate motion reference.
 
-Usage: blender -b -P mocap_render.py -- motion.bvh out.mp4 [--seconds 3] [--fps 24]
+Usage: blender -b -P mocap_render.py -- motion.bvh out.mp4 [--seconds 3] [--fps 24] [--speed 1] [--depth]
 
 Long takes are cut to their busiest stretch. Short clips are looped: it finds one full stride, repeats it, and carries
 the body forward each time. A moving body gets a side-on tracking camera; one that stays in place gets a still camera
@@ -62,6 +62,15 @@ def busiest_window(frames, length):
     change = np.abs(np.diff(frames[:, 6:], axis=0))
     change = np.minimum(change, 360 - change).sum(1)
     return int(np.argmax(np.convolve(change, np.ones(length - 1), "valid")))
+
+
+def resample(frames, frame_time, step_time, count):
+    """`count` frames every `step_time` seconds, blended between captured frames, so timing stays even at any frame rate
+    (dropping frames to change rate makes a body jerk)."""
+    smooth = frames.copy()
+    smooth[:, 3:] = np.unwrap(frames[:, 3:], period=360, axis=0)  # so 179 to -179 degrees blends through 180, not 0
+    source, times = np.arange(len(frames)) * frame_time, np.arange(count) * step_time
+    return np.stack([np.interp(times, source, smooth[:, c]) for c in range(frames.shape[1])], axis=1)
 
 
 def write_bvh(path, header, frame_time, frames):
@@ -153,22 +162,25 @@ def main():
     parser.add_argument("out")
     parser.add_argument("--seconds", type=float, default=3)
     parser.add_argument("--fps", type=int, default=24)
+    parser.add_argument("--speed", type=float, default=1.0, help="0.5 plays the motion at half speed, to make twice the real frames and speed it back up later")
     parser.add_argument("--depth", action="store_true", help="render distance from the camera (near is white) as a VACE control video")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
     header, frame_time, frames = read_bvh(args.bvh)
-    step = max(1, round(1 / (args.fps * frame_time)))
-    need = int(args.seconds / frame_time) + step
+    count = int(args.seconds * args.fps) + 1
+    step_time = args.speed / args.fps
+    need = int((count - 1) * step_time / frame_time) + 2
     if len(frames) >= need:
         begin = busiest_window(frames, need)
-        looped = frames[begin:begin + need][::step]
+        motion = frames[begin:begin + need]
         print(f"Using {begin * frame_time:.1f}-{(begin + need) * frame_time:.1f} s of {len(frames) * frame_time:.1f} s", flush=True)
     else:
         period = stride_period(frames, frame_time)
-        looped = loop_motion(frames, period, need)[::step]
-        print(f"Stride: {period * frame_time:.2f} s, looped to {len(looped)} frames at {args.fps} fps", flush=True)
+        motion = loop_motion(frames, period, need)
+        print(f"Stride: {period * frame_time:.2f} s, looped", flush=True)
+    looped = resample(motion, frame_time, step_time, count)
     looped_path = os.path.splitext(args.out)[0] + "_looped.bvh"
-    write_bvh(looped_path, header, frame_time * step, looped)
+    write_bvh(looped_path, header, 1 / args.fps, looped)
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
@@ -282,5 +294,9 @@ if __name__ == "__main__":
     still = np.zeros((30, 7))
     still[12:18, 6] = np.arange(6) * 20
     assert busiest_window(still, 8) in (11, 12), busiest_window(still, 8)
+    turn = np.zeros((3, 7))
+    turn[:, 0], turn[:, 6] = [0, 1, 2], [170, 179, -172]
+    even = resample(turn, 0.1, 0.05, 5)
+    assert np.allclose(even[:, 0], [0, .5, 1, 1.5, 2]) and np.isclose(even[3, 6], 183.5), even
     if "--" in sys.argv:
         main()

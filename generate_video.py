@@ -300,7 +300,7 @@ def add_finishing(workflow, width, height, tiled, upscale, smooth, target_fps=No
         workflow["32"] = {"class_type": "ImageScale", "inputs": {"image": ["31", 0], "upscale_method": "lanczos", "width": width * 2, "height": height * 2, "crop": "disabled"}}
         images = ["32", 0]
     if smooth:
-        workflow["33"] = {"class_type": "FrameInterpolationModelLoader", "inputs": {"model_name": "rife_v4.26.safetensors"}}
+        workflow["33"] = {"class_type": "FrameInterpolationModelLoader", "inputs": {"model_name": "film_net_fp16.safetensors"}}
         # aim for about 48 fps: 16 fps needs tripling, 24 fps doubling
         multiplier = max(2, round((target_fps or 48) / workflow["10"]["inputs"]["fps"]))
         workflow["34"] = {"class_type": "FrameInterpolate", "inputs": {"interp_model": ["33", 0], "images": images, "multiplier": multiplier}}
@@ -487,7 +487,7 @@ def main():
     parser.add_argument("--match-motion", action="store_true", help=f"remake at lower strengths until the motion matches the reference, up to {MOTION_ATTEMPTS} tries, grading each")
     parser.add_argument("--tiled", action="store_true", help="decode in pieces: less memory, small risk of seams")
     parser.add_argument("--upscale", action="store_true", help="double the resolution with RealESRGAN")
-    parser.add_argument("--smooth", action=argparse.BooleanOptionalAction, help="raise the frame rate to about 48 fps with RIFE; on by default for 14b")
+    parser.add_argument("--smooth", action=argparse.BooleanOptionalAction, help="raise the frame rate to about 48 fps with FILM; on by default for 14b")
     parser.add_argument("--fps", type=int, help="final frame rate: 14b gives 16, 32 or 48, and 5b gives 24 or 48")
     parser.add_argument("--preset", choices=PRESETS, help="draft is fastest, max is slowest; other options still override")
     parser.add_argument("--estimate", action="store_true", help="show the settings and rough time, then stop")

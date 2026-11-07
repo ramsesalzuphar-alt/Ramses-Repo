@@ -5,7 +5,11 @@
 3. Makes a quick Wan 5B clip of the prompt and takes its clearest whole-body frame as the subject's look.
 4. Runs VACE 14B (generate_video.py --vace) and reviews the result (grade_video.py --review).
 
-Usage: auto_vace.py "prompt" [--seconds 3] [--full] [--take 05_01] [--subject IMAGE] [--pick-only]
+Wan 14B makes 16 frames a second, and filling the gaps with interpolation smears fast limbs. So the motion is rendered
+at half speed, made at 16 fps, and played back at 32 fps: every frame is a real one. 81 frames is Wan's limit, so
+that allows 2.5 seconds.
+
+Usage: auto_vace.py "prompt" [--seconds 2.5] [--full] [--take 05_01] [--subject IMAGE] [--pick-only]
 
 Prompts with no human action in the library (a car, waves) are made with plain Wan 14B instead.
 The progress page (/progress) shows each step from ~/ComfyUI/output/plan.json.
@@ -26,6 +30,8 @@ MOCAP = os.path.join(COMFY, "mocap")
 CMU = os.path.join(MOCAP, "cmu")
 HISTORY = os.path.join(COMFY, "output", "history.jsonl")
 PLAN = os.path.join(COMFY, "output", "plan.json")
+SLOW = 0.5  # motion speed while generating; the clip is sped back up by 1 / SLOW
+MAX_FRAMES = 81
 BLENDER = r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 SOURCE = "https://raw.githubusercontent.com/meshula/cmu-mocap/master/"
 # words that say nothing about the movement
@@ -135,15 +141,32 @@ def subject_image(prompt, seed_tries=2):
     return None
 
 
+def speed_up(source, target, fps):
+    """The same frames, played at a new rate: each frame kept once."""
+    import av
+    with av.open(source) as src, av.open(target, "w") as out:
+        stream = out.add_stream("libx264", rate=fps)
+        video = src.streams.video[0]
+        stream.width, stream.height, stream.pix_fmt, stream.options = video.width, video.height, "yuv420p", {"crf": "12"}
+        for frame in src.decode(video=0):
+            out.mux(stream.encode(av.VideoFrame.from_ndarray(frame.to_ndarray(format="rgb24"), format="rgb24")))
+        out.mux(stream.encode())
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("prompt")
-    parser.add_argument("--seconds", type=float, default=3)
+    parser.add_argument("--seconds", type=float, default=2.5, help=f"up to {(MAX_FRAMES - 1) * SLOW / 16:g}: longer would pass Wan's {MAX_FRAMES}-frame limit")
     parser.add_argument("--full", action="store_true", help="1280x704 instead of 832x480: sharper, about 4 times slower")
     parser.add_argument("--take", help="use this CMU take, such as 05_01, instead of picking one")
     parser.add_argument("--subject", help="use this image for the subject's look instead of making one")
     parser.add_argument("--pick-only", action="store_true", help="show the motion it would use, then stop")
     args = parser.parse_args()
+    longest = (MAX_FRAMES - 1) * SLOW / 16
+    if args.seconds > longest:
+        print(f"Shortened to {longest:g} s: at 32 real frames a second, longer would pass Wan's {MAX_FRAMES}-frame limit", flush=True)
+        args.seconds = longest
+    made_seconds = args.seconds / SLOW
     size = ["--width", "1280", "--height", "704"] if args.full else ["--width", "832", "--height", "480"]
     started = time.time()
 
@@ -167,12 +190,12 @@ def main():
     steps = [{"name": f"Motion: CMU {take} ({description})", "status": "done"},
              {"name": "Blender depth video", "status": "running", "eta": "about 1 min"},
              {"name": "Subject image (quick Wan 5B clip)", "status": "waiting", "eta": "about 3 min"},
-             {"name": "VACE 14B video", "status": "waiting", "comfy": True, "eta": "about 4 hours" if args.full else "about 1 hour"},
+             {"name": "VACE 14B video", "status": "waiting", "comfy": True, "eta": "about 7 hours" if args.full else "about 2 hours"},
              {"name": "Review", "status": "waiting", "eta": "about 5 min"}]
     set_plan(steps)
     control = os.path.join(MOCAP, f"{take}_depth.mp4")
     render = subprocess.run([BLENDER, "-b", "-P", os.path.join(REPO, "mocap_render.py"), "--", bvh, control,
-                             "--seconds", str(args.seconds + 0.25), "--depth"], capture_output=True, text=True, errors="replace")
+                             "--seconds", str(made_seconds + 0.25), "--fps", "16", "--speed", str(SLOW), "--depth"], capture_output=True, text=True, errors="replace")
     if render.returncode != 0 or not os.path.isfile(control):
         set_plan(steps, 1, "failed")
         sys.exit("Blender render failed:\n" + render.stdout[-1500:] + render.stderr[-1500:])
@@ -187,11 +210,13 @@ def main():
     print(f"Subject: {subject}", flush=True)
 
     set_plan(steps, 3, "running")
-    clip = generate([args.prompt, "--vace", control, "--subject", subject, "--seconds", str(args.seconds), "--steps", "20",
-                     "--tiled", "--crf", "12", "--session", "auto", *size])
-    if not clip:
+    made = generate([args.prompt, "--vace", control, "--subject", subject, "--seconds", str(made_seconds), "--steps", "20",
+                     "--tiled", "--crf", "12", "--no-smooth", "--session", "auto", *size])
+    if not made:
         set_plan(steps, 3, "failed")
         sys.exit("VACE generation failed")
+    clip = os.path.splitext(made)[0] + "_32fps.mp4"
+    speed_up(os.path.join(COMFY, "output", "video", made), os.path.join(COMFY, "output", "video", clip), round(16 / SLOW))
     set_plan(steps, 3, "done")
 
     set_plan(steps, 4, "running")
