@@ -36,6 +36,17 @@ Reports are in `~/ComfyUI/output/practice`. The scores are rough, and the model 
 from 0 to 1 and says what stands out, such as "knees bend too little". Practice uses it in its ranking. The comparison
 gets better as practice saves more real clips, and it runs on the CPU, so the first check of new clips is slow.
 
+## Motion from motion capture
+
+`mocap_render.py` renders a motion-capture clip (BVH) in Blender as a plain figure in a shirt and shorts, side-on, with a
+tracking camera and the whole body in frame. Short clips are looped one stride at a time. Use the result as `--video`
+with `--animate`, so the movement comes from a real person's capture instead of a YouTube clip:
+
+    blender -b -P mocap_render.py -- 16_35.bvh run.mp4 --seconds 3
+
+Free running clips are in the CMU motion capture library (BVH copy: github.com/meshula/cmu-mocap, subjects 09, 16 and 35).
+Saved in `~/ComfyUI/mocap`. It needs Blender 5.2 or later.
+
 ## Sessions
 
 `--session NAME` saves your scene and clips in `~/ComfyUI/output/sessions`, so nothing you asked for gets lost.
