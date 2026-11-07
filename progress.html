@@ -17,11 +17,28 @@
   progress { width: 100%; height: 14px; margin-top: 8px; accent-color: #2f6fed; }
   .empty { opacity: .6; font-style: italic; }
   .error { color: #d33; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid #8884; vertical-align: top; }
+  th { font-size: .85rem; opacity: .7; font-weight: 600; }
+  td.state { width: 1.6em; font-size: 1.1rem; }
+  td.bar { width: 34%; }
+  td.bar progress { margin-top: 2px; }
+  tr.done td { opacity: .65; }
+  tr.running td.name { font-weight: 600; }
+  @media (max-width: 560px) { td.bar { width: auto; } th.hide, td.hide { display: none; } }
 </style>
 </head>
 <body>
   <h1>Progress</h1>
   <p class="muted" id="updated" role="status">Loading…</p>
+
+  <section id="planBox" hidden>
+    <h2 id="planTitle">Plan</h2>
+    <table>
+      <thead><tr><th></th><th>Step</th><th>Progress</th><th class="hide">Time left</th></tr></thead>
+      <tbody id="plan"></tbody>
+    </table>
+  </section>
 
   <h2>Generating now (ComfyUI)</h2>
   <div id="comfy"></div>
@@ -66,11 +83,58 @@ function fill(id, items, emptyText) {
   $(id).replaceChildren(...(items.length ? items : [Object.assign(document.createElement('p'), { className: 'empty', textContent: emptyText })]));
 }
 
+const ICON = { done: '✅', running: '⏳', failed: '❌', waiting: '·' };
+const STATE = { done: 'done', running: 'in progress', failed: 'failed', waiting: 'waiting' };
+
+function cell(text, className) {
+  const td = document.createElement('td');
+  if (className) td.className = className;
+  td.textContent = text;
+  return td;
+}
+
+function planRow(step) {
+  const row = document.createElement('tr');
+  const status = ICON[step.status] ? step.status : 'waiting';
+  row.className = status;
+  const icon = cell(ICON[status], 'state');
+  icon.setAttribute('aria-label', STATE[status]);
+  const name = cell(step.name || '', 'name');
+  if (step.detail || step.stage) {
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = [step.detail, step.stage ? `now: ${step.stage}` : ''].filter(Boolean).join(' · ');
+    name.append(meta);
+  }
+  const bar = cell('', 'bar');
+  if (step.percent != null) {
+    const p = document.createElement('progress');
+    p.max = 100;
+    p.value = step.percent;
+    p.setAttribute('aria-label', `${step.name}: ${step.percent}%`);
+    const text = document.createElement('div');
+    text.className = 'meta';
+    text.textContent = `${step.percent}%` + (step.mb != null ? ` · ${step.mb} MB` : '') + (step.mb_per_s != null ? ` · ${step.mb_per_s} MB/s` : '');
+    bar.append(p, text);
+  } else {
+    bar.textContent = status === 'done' ? 'Done' : '—';
+  }
+  const left = step.left != null ? `about ${time(step.left)}` : (step.eta || (status === 'done' ? '' : '—'));
+  row.append(icon, name, bar, cell(left, 'hide'));
+  return row;
+}
+
 async function refresh() {
   try {
     const data = await (await fetch('/api/progress')).json();
     $('updated').textContent = `Updated ${data.time}, every 3 seconds`;
     $('updated').className = 'muted';
+
+    $('planBox').hidden = !data.plan;
+    if (data.plan) {
+      $('planTitle').textContent = data.plan.title;
+      $('plan').replaceChildren(...data.plan.steps.map(planRow));
+    }
 
     if (data.comfy === null) fill('comfy', [], 'ComfyUI is not running.');
     else fill('comfy', data.comfy.map(job => {

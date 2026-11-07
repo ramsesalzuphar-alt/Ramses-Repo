@@ -35,8 +35,9 @@ WORDS = {
 model = None
 
 
-def pose_track(path):
-    """Keypoints of one person, followed from frame to frame, on a 16 fps grid, on the CPU so it can't take GPU memory. None if no one is found."""
+def pose_frames(path, seconds=MAX_SECONDS):
+    """Keypoints of one person, followed from frame to frame, on a 16 fps grid, on the CPU so it can't take GPU memory.
+    None for a frame where no whole person is clearly visible."""
     global model
     if model is None:
         from torchvision.models.detection import KeypointRCNN_ResNet50_FPN_Weights, keypointrcnn_resnet50_fpn
@@ -46,7 +47,7 @@ def pose_track(path):
         for frame in container.decode(video=0):
             if frame.time is None or frame.time + 1e-6 < next_time:
                 continue
-            if frame.time > MAX_SECONDS:
+            if frame.time > seconds:
                 break
             next_time += 1 / RATE
             rgb = frame.to_ndarray(format="rgb24", height=480, width=round(480 * frame.width / frame.height))
@@ -65,6 +66,12 @@ def pose_track(path):
             else:
                 pick = min(people, key=lambda p: np.linalg.norm(p.mean(0) - last.mean(0)))
             points.append(pick)
+    return points
+
+
+def pose_track(path):
+    """pose_frames with short gaps filled, or None if the person is missing from too many frames."""
+    points = pose_frames(path)
     found = [p for p in points if p is not None]
     if len(found) < 0.8 * len(points) or len(found) < 12:
         return None

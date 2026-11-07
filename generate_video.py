@@ -76,6 +76,8 @@ FPS = 24
 FPS_14B = 16
 # the distilled Animate model is built for this many steps
 ANIMATE_STEPS = 10
+VACE_HIGH = "Wan2.2-VACE-Fun-A14B-high-noise-Q6_k.gguf"
+VACE_LOW = "Wan2.2-VACE-Fun-A14B-low-noise-Q6_K.gguf"
 NEGATIVE = (
     "blurry, low quality, distorted, deformed, extra limbs, extra fingers, bad anatomy, "
     "static, still frame, watermark, text, subtitles"
@@ -224,6 +226,41 @@ def build_animate_workflow(prompt, image, video, frames, fps, width, height, see
         "24": {"class_type": "TrimVideoLatent", "inputs": {"samples": ["23", 0], "trim_amount": ["22", 3]}},
         "25": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "lcm"}},
         "26": {"class_type": "BasicScheduler", "inputs": {"model": ["2", 0], "scheduler": "simple", "steps": ANIMATE_STEPS, "denoise": 1.0}},
+    }
+
+
+def build_vace_workflow(prompt, image, control, frames, fps, width, height, seed, steps, strength=1.0):
+    """Wan 2.2 VACE Fun 14B (GGUF, two stages like 14B): follows a control video such as depth, and takes the look from an image."""
+    switch = steps // 2
+    scale = lambda source: {"class_type": "ImageScale", "inputs": {"image": source, "upscale_method": "area", "width": width, "height": height, "crop": "center"}}
+    encode = lambda text: {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": text}}
+    shared = {"positive": ["22", 0], "negative": ["22", 1], "steps": steps, "cfg": 3.5, "sampler_name": "euler", "scheduler": "simple", "noise_seed": seed}
+    return {
+        "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": VACE_HIGH}},
+        "2": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": 8.0}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan"}},
+        "4": encode(prompt),
+        "5": encode(NEGATIVE),
+        "6": {"class_type": "VAELoader", "inputs": {"vae_name": "wan_2.1_vae.safetensors"}},
+        "8": {"class_type": "KSamplerAdvanced", "inputs": {**shared, "model": ["2", 0], "latent_image": ["22", 2], "add_noise": "enable", "start_at_step": 0, "end_at_step": switch, "return_with_leftover_noise": "enable"}},
+        "9": {"class_type": "VAEDecode", "inputs": {"samples": ["23", 0], "vae": ["6", 0]}},
+        "10": {"class_type": "CreateVideo", "inputs": {"images": ["24", 0], "fps": fps}},
+        "11": {"class_type": "SaveVideo", "inputs": {"video": ["10", 0], "filename_prefix": "video/wan", "format": "auto", "format.codec": "auto"}},
+        "12": {"class_type": "LoadImage", "inputs": {"image": image}},
+        "13": scale(["12", 0]),
+        "14": {"class_type": "LoadVideo", "inputs": {"file": control}},
+        "15": {"class_type": "GetVideoComponents", "inputs": {"video": ["14", 0]}},
+        "16": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": VACE_LOW}},
+        "17": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["16", 0], "shift": 8.0}},
+        "18": {"class_type": "KSamplerAdvanced", "inputs": {**shared, "model": ["17", 0], "latent_image": ["8", 0], "add_noise": "disable", "start_at_step": switch, "end_at_step": steps, "return_with_leftover_noise": "disable"}},
+        "20": {"class_type": "ImageFromBatch", "inputs": {"image": ["15", 0], "batch_index": 0, "length": frames}},
+        "21": scale(["20", 0]),
+        "22": {"class_type": "WanVaceToVideo", "inputs": {
+            "positive": ["4", 0], "negative": ["5", 0], "vae": ["6", 0], "width": width, "height": height, "length": frames, "batch_size": 1,
+            "strength": strength, "control_video": ["21", 0], "reference_image": ["13", 0]}},
+        "23": {"class_type": "TrimVideoLatent", "inputs": {"samples": ["18", 0], "trim_amount": ["22", 3]}},
+        # the first decoded frame shows a faint ghost of the control figure, so it is dropped
+        "24": {"class_type": "ImageFromBatch", "inputs": {"image": ["9", 0], "batch_index": 1, "length": 4096}},
     }
 
 
@@ -467,6 +504,8 @@ def main():
     parser.add_argument("--final", action="store_true", help="also save a graded copy with light sharpening and film grain")
     parser.add_argument("--join", nargs="+", metavar="CLIP", help="cut these logged clips into one film")
     parser.add_argument("--music", help="audio file to play over --join")
+    parser.add_argument("--vace", metavar="CONTROL", help="follow a control video (such as a Blender depth render) with VACE 14B; use with --subject")
+    parser.add_argument("--subject", metavar="IMAGE", help="with --vace: the image that sets how the subject looks")
     parser.add_argument("--session", help="project name: remembers your instructions and clips between generations")
     parser.add_argument("--remember", action="append", default=[], metavar="KEY=VALUE", help="save or replace an instruction, such as outfit=red t-shirt")
     parser.add_argument("--forget", action="append", default=[], metavar="KEY", help="remove a saved instruction")
@@ -483,7 +522,7 @@ def main():
         args = parser.parse_args()
     if args.smooth is None:
         # 14B and Animate are made at 16 fps, which looks choppy unless smoothed
-        args.smooth = args.model == "14b" or bool(args.animate)
+        args.smooth = args.model == "14b" or bool(args.animate or args.vace)
     if args.rate:
         return rate_clip(*args.rate)
     if args.history:
@@ -583,7 +622,16 @@ def main():
     if extras and session is None:
         args.prompt = f"{args.prompt}, {extras}"
     seed = args.seed if args.seed is not None else random.randrange(2**32)
-    if args.animate:
+    if args.vace:
+        if args.animate or args.video or not args.subject or not os.path.isfile(args.subject):
+            sys.exit("--vace needs --subject IMAGE, and can't be used with --animate or --video")
+        image = os.path.basename(args.subject)
+        if os.path.abspath(args.subject) != os.path.abspath(os.path.join(COMFY_INPUT, image)):
+            shutil.copyfile(args.subject, os.path.join(COMFY_INPUT, image))
+        filename, frames, fps = prepare_video(args.vace, args.seconds, FPS_14B)
+        args.model = "vace"
+        workflow = build_vace_workflow(args.prompt, image, filename, frames, fps, args.width, args.height, seed, args.steps, args.strength)
+    elif args.animate:
         if not args.video:
             sys.exit("--animate needs --video for the motion")
         if not os.path.isfile(args.animate):
@@ -617,8 +665,8 @@ def main():
         save_session(args.session, session)
     if args.crf is not None:
         workflow["11"]["inputs"].update({"format.codec": "h264", "format.codec.encoding": "re-encode", "format.codec.encoding.crf": args.crf})
-    if args.model == "animate":
-        # Animate caches its model in RAM, and on top of models kept from earlier jobs that overflowed 31 GB and stalled for hours
+    if args.model in ("animate", "vace"):
+        # Animate and VACE 14B are big: Animate caches its model in RAM, and on top of models kept from earlier jobs that overflowed 31 GB and stalled for hours
         free = urllib.request.Request(SERVER + "/free", data=json.dumps({"unload_models": True, "free_memory": True}).encode(), headers={"Content-Type": "application/json"})
         urllib.request.urlopen(free, timeout=30).close()  # answers with an empty body, not JSON
     try:
@@ -678,6 +726,9 @@ if __name__ == "__main__":
     use_turbo(turbo)
     assert turbo["2"]["inputs"]["model"] == ["19", 0] and turbo["19"]["inputs"]["model"] == ["1", 0] and turbo["8"]["inputs"]["cfg"] == 1.0
     assert drop_options(["p", "--match-motion", "--strength", "0.6", "--fast", "--video=a.mp4", "--seconds", "2"], {"--match-motion"}, {"--strength", "--video"}) == ["p", "--fast", "--seconds", "2"]
+    vace = build_vace_workflow("p", "s.png", "c.mp4", 49, 16.0, 832, 480, 1, 20)
+    assert vace["8"]["inputs"]["end_at_step"] == 10 and vace["18"]["inputs"]["start_at_step"] == 10 and vace["9"]["inputs"]["samples"] == ["23", 0] and vace["10"]["inputs"]["images"] == ["24", 0]
+    assert vace["22"]["inputs"]["control_video"] == ["21", 0] and vace["23"]["inputs"]["trim_amount"] == ["22", 3]
     assert best_settings([]) == BEST_PRESET
     assert best_settings([{"rating": 3, "settings": {"steps": 1}}]) == BEST_PRESET
     assert best_settings([{"rating": 5, "settings": {"steps": 1}}, {"rating": 5, "settings": {"steps": 2}}, {"settings": {"steps": 3}}]) == {"steps": 2, "smooth": True}

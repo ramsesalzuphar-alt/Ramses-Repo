@@ -44,6 +44,15 @@ with `--animate`, so the movement comes from a real person's capture instead of 
 
     blender -b -P mocap_render.py -- 16_35.bvh run.mp4 --seconds 3
 
+Add `--depth` to render distance from the camera instead (near is white), as a control video for VACE:
+
+    generate_video.py "prompt" --vace run_depth.mp4 --subject person.png --seconds 3 --width 832 --height 480 --steps 20
+
+VACE is Wan 2.2 VACE Fun 14B, compressed (GGUF Q6_K) from QuantStack/Wan2.2-VACE-Fun-A14B-GGUF, in
+`~/ComfyUI/models/unet`. It needs the ComfyUI-GGUF add-on (city96) and its `gguf` and `protobuf` packages. Depth carries
+the whole shape of the scene, so it can follow things Animate's pose can't, such as clothes and the ground; Animate keeps
+a person's look more reliably.
+
 Free running clips are in the CMU motion capture library (BVH copy: github.com/meshula/cmu-mocap, subjects 09, 16 and 35).
 Saved in `~/ComfyUI/mocap`. It needs Blender 5.2 or later.
 
@@ -181,3 +190,9 @@ itself is 1.0 and an unrelated clip about 0. Steadiness, 0 to 1, compares how cl
 with the real reference; AI video shimmers and morphs between frames. It's a rough sign of real footage, not proof: it
 can't see a wrong face or a plastic look. Asking `gemma4:e4b` to judge realism from frames was tried and dropped, since
 it rated real YouTube clips no higher than generated ones.
+
+`grade_video.py clip.mp4 --review [--reference ref.mp4]` looks over the whole clip frame by frame. It lists jumps (a frame
+that pops, flickers or morphs instead of following on from the last) and form breaks (frames where the body stops being a
+clear, whole person), and gives smoothness from 0 to 1, against the reference when one is given. On test clips it found
+jumps and form breaks in the early clip 9, where the runner kept reforming, and none in the full-size clips 58 and 60.
+Limb length was tried as a sign of glitches and dropped: blur on real footage makes it jump more than in good AI clips.

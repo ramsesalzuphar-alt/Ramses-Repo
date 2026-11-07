@@ -16,6 +16,11 @@ COMFY = "http://127.0.0.1:8188"
 SCRIPTS = {"generate_video.py": "Video", "practice.py": "Practice", "reference_video.py": "Reference download", "grade_video.py": "Grading", "build_dataset.py": "Dataset"}
 DOWNLOAD_FOLDERS = [os.path.expanduser(p) for p in ("~/ComfyUI/models", "~/ComfyUI/reference", "~/.ollama/models/blobs")]
 PARTIAL = (".part", ".partial", "-partial", ".ytdl", ".tmp")
+# a list of steps for the current piece of work, written by Claude or a script:
+# {"title": "...", "steps": [{"name", "status": "done|running|waiting|failed", "detail", "file", "total_mb", "comfy"}]}
+# "file" and "total_mb" make a step's bar follow a download; "comfy": true makes it follow the running ComfyUI job.
+PLAN = os.path.expanduser("~/ComfyUI/output/plan.json")
+plan_sizes = {}
 NEGATIVE_START = "blurry, low quality"
 steps = {}  # prompt_id -> {"node", "value", "max", "first", "last"}
 last_sizes = {}
@@ -132,6 +137,47 @@ def downloads():
     return found
 
 
+def file_progress(step, now):
+    """Size, share done, speed and time left of a download, from the file growing on disk."""
+    path = os.path.expanduser(step["file"])
+    partial = next((path + end for end in PARTIAL if os.path.isfile(path + end)), None)
+    current = partial or (path if os.path.isfile(path) else None)
+    total = float(step["total_mb"])
+    if current is None:
+        return {}
+    size = os.path.getsize(current) / 1e6
+    if partial is None:
+        return {"status": "done", "percent": 100.0, "mb": round(size)}
+    before = plan_sizes.get(current)
+    plan_sizes[current] = (size, now)
+    result = {"percent": round(min(size / total * 100, 99.9), 1), "mb": round(size)}
+    if before and now - before[1] > 0.5 and size > before[0]:
+        speed = (size - before[0]) / (now - before[1])
+        result.update({"mb_per_s": round(speed, 1), "left": round((total - size) / speed)})
+    return result
+
+
+def plan(jobs):
+    """The steps in plan.json, with live bars filled in for downloads and the ComfyUI job."""
+    try:
+        with open(PLAN, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    now, running = time.time(), next((j for j in jobs or [] if j["state"] == "running"), None)
+    steps = []
+    for step in data.get("steps", [])[:30]:
+        shown = {key: step.get(key) for key in ("name", "status", "detail", "eta")}
+        if step.get("file") and step.get("total_mb"):
+            shown.update(file_progress(step, now))
+            if shown.get("percent") and shown["status"] == "waiting":
+                shown["status"] = "running"
+        if step.get("comfy") and shown["status"] == "running" and running and running.get("steps"):
+            shown.update({"percent": round(running["step"] / running["steps"] * 100, 1), "stage": running.get("stage"), "left": running.get("stage_left"), "elapsed": running.get("elapsed")})
+        steps.append(shown)
+    return {"title": data.get("title", "Plan"), "steps": steps}
+
+
 def gpu():
     try:
         out = subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5).stdout
@@ -142,7 +188,8 @@ def gpu():
 
 
 def snapshot(studio_job):
-    return {"time": time.strftime("%H:%M:%S"), "comfy": comfy_jobs(), "scripts": scripts(), "downloads": downloads(), "gpu": gpu(), "studio": studio_job}
+    jobs = comfy_jobs()
+    return {"time": time.strftime("%H:%M:%S"), "plan": plan(jobs), "comfy": jobs, "scripts": scripts(), "downloads": downloads(), "gpu": gpu(), "studio": studio_job}
 
 
 if __name__ == "__main__":

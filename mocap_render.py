@@ -144,6 +144,7 @@ def main():
     parser.add_argument("out")
     parser.add_argument("--seconds", type=float, default=3)
     parser.add_argument("--fps", type=int, default=24)
+    parser.add_argument("--depth", action="store_true", help="render distance from the camera (near is white) as a VACE control video")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
     header, frame_time, frames = read_bvh(args.bvh)
@@ -209,6 +210,21 @@ def main():
     world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.75, 0.77, 0.8, 1)
     scene.view_settings.view_transform = "Standard"  # plain colours, so the figure stands out from the floor
     scene.world = world
+    if args.depth:
+        # every surface glows by its distance from the camera, so nothing but shape and distance reaches the control video
+        depth = bpy.data.materials.new("Depth")
+        depth.use_nodes = True
+        nodes, links = depth.node_tree.nodes, depth.node_tree.links
+        nodes.clear()
+        camera_data, ramp = nodes.new("ShaderNodeCameraData"), nodes.new("ShaderNodeMapRange")
+        glow, output = nodes.new("ShaderNodeEmission"), nodes.new("ShaderNodeOutputMaterial")
+        ramp.inputs["From Min"].default_value, ramp.inputs["From Max"].default_value = distance - 0.55, distance + 0.75  # just around the runner, so near and far limbs differ
+        ramp.inputs["To Min"].default_value, ramp.inputs["To Max"].default_value = 1.0, 0.0
+        links.new(camera_data.outputs["View Z Depth"], ramp.inputs["Value"])
+        links.new(ramp.outputs["Result"], glow.inputs["Color"])
+        links.new(glow.outputs["Emission"], output.inputs["Surface"])
+        scene.view_layers[0].material_override = depth
+        world.node_tree.nodes["Background"].inputs["Color"].default_value = (0, 0, 0, 1)
 
     for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"):
         try:
