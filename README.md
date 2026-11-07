@@ -56,6 +56,17 @@ a person's look more reliably.
 Free running clips are in the CMU motion capture library (BVH copy: github.com/meshula/cmu-mocap, subjects 09, 16 and 35).
 Saved in `~/ComfyUI/mocap`. It needs Blender 5.2 or later.
 
+### One prompt, whole chain
+
+    auto_vace.py "a woman dancing salsa in a ballroom" [--full] [--seconds 3]
+
+It picks the CMU take whose description best matches the prompt's action (from about 2,500, such as walk, run, jump,
+punch, salsa), renders it as depth in Blender, makes a quick Wan 5B clip of the prompt and takes its clearest whole-body
+frame as the subject's look, then runs VACE 14B and reviews the result. Long takes are cut to their busiest stretch; a
+body that stays in place gets a still camera in front. Prompts with no matching human action use plain Wan 14B.
+About 1 hour at 832x480, or 4 hours with `--full` (1280x704). `--pick-only` shows the chosen motion. The `vace-video`
+skill runs it from a plain prompt.
+
 ## Sessions
 
 `--session NAME` saves your scene and clips in `~/ComfyUI/output/sessions`, so nothing you asked for gets lost.

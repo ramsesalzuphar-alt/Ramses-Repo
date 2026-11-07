@@ -1,6 +1,6 @@
 ---
 name: auto-video
-description: Make a video from just a prompt in one step, using the local ComfyUI and Wan install with no credits. It picks YouTube search words from the prompt, downloads the best short reference clip and reworks it to match the prompt. Use when the user gives a prompt and wants a video without choosing settings or a reference, or invokes /auto-video. NOT for a clip the user already has (use rework-video), choosing settings (use generate-video), or Higgsfield generation (use higgsfield-generate).
+description: Make a video from just a prompt in one step, using the local ComfyUI and Wan install with no credits. It picks YouTube search words from the prompt, downloads the best short reference clip and reworks it to match the prompt. Use when the user gives a prompt and wants a video without choosing settings or a reference, or invokes /auto-video. NOT for a plain video prompt (use vace-video, the default), a clip the user already has (use rework-video), choosing settings (use generate-video), or Higgsfield generation (use higgsfield-generate).
 ---
 
 # Auto video

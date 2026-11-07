@@ -2,7 +2,9 @@
 
 Usage: blender -b -P mocap_render.py -- motion.bvh out.mp4 [--seconds 3] [--fps 24]
 
-Short clips are looped: it finds one full stride, repeats it, and carries the body forward each time.
+Long takes are cut to their busiest stretch. Short clips are looped: it finds one full stride, repeats it, and carries
+the body forward each time. A moving body gets a side-on tracking camera; one that stays in place gets a still camera
+in front, turned 30 degrees.
 """
 import argparse
 import math
@@ -53,6 +55,13 @@ def loop_motion(frames, period, count):
         frame[:3] += travel * (i // period)
         out.append(frame)
     return np.array(out)
+
+
+def busiest_window(frames, length):
+    """Start of the stretch of `length` frames with the most movement, so a long take skips its standing start and end."""
+    change = np.abs(np.diff(frames[:, 6:], axis=0))
+    change = np.minimum(change, 360 - change).sum(1)
+    return int(np.argmax(np.convolve(change, np.ones(length - 1), "valid")))
 
 
 def write_bvh(path, header, frame_time, frames):
@@ -148,12 +157,18 @@ def main():
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
     header, frame_time, frames = read_bvh(args.bvh)
-    period = stride_period(frames, frame_time)
     step = max(1, round(1 / (args.fps * frame_time)))
-    looped = loop_motion(frames, period, int(args.seconds / frame_time) + step)[::step]
+    need = int(args.seconds / frame_time) + step
+    if len(frames) >= need:
+        begin = busiest_window(frames, need)
+        looped = frames[begin:begin + need][::step]
+        print(f"Using {begin * frame_time:.1f}-{(begin + need) * frame_time:.1f} s of {len(frames) * frame_time:.1f} s", flush=True)
+    else:
+        period = stride_period(frames, frame_time)
+        looped = loop_motion(frames, period, need)[::step]
+        print(f"Stride: {period * frame_time:.2f} s, looped to {len(looped)} frames at {args.fps} fps", flush=True)
     looped_path = os.path.splitext(args.out)[0] + "_looped.bvh"
     write_bvh(looped_path, header, frame_time * step, looped)
-    print(f"Stride: {period * frame_time:.2f} s, looped to {len(looped)} frames at {args.fps} fps", flush=True)
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
@@ -179,8 +194,17 @@ def main():
         hips.append(world @ armature.pose.bones["Hips"].head)
         lowest = min(lowest, min((world @ p.tail).z for p in armature.pose.bones if "Toe" in p.name or "Foot" in p.name))
     start, end = hips[0], hips[-1]
-    forward = Vector((end.x - start.x, end.y - start.y, 0)).normalized()
-    side = Vector((-forward.y, forward.x, 0))
+    if (end - start).length > HEIGHT * 0.5:
+        forward = Vector((end.x - start.x, end.y - start.y, 0)).normalized()
+        side = Vector((-forward.y, forward.x, 0))
+    else:
+        # staying in place (dancing, boxing): a still camera in front, from which way the hips face on the first frame
+        scene.frame_set(scene.frame_start)
+        world = armature.matrix_world
+        across = world @ armature.pose.bones["LeftUpLeg"].head - world @ armature.pose.bones["RightUpLeg"].head
+        across.z = 0
+        side = Matrix.Rotation(math.radians(30), 3, "Z") @ across.normalized().cross(Vector((0, 0, 1)))
+        start = end = sum(hips, Vector()) / len(hips)
 
     bpy.ops.mesh.primitive_plane_add(size=200, location=(start.x, start.y, lowest - HEIGHT * 0.012))
     floor = bpy.context.object
@@ -191,13 +215,14 @@ def main():
     bpy.context.collection.objects.link(camera)
     scene.camera = camera
     distance = HEIGHT * 3.2
-    count = len(hips)
+    count, depths = len(hips), []
     for i, frame in enumerate(range(scene.frame_start, scene.frame_end + 1)):
         # follow a straight line at the average speed, so the camera doesn't bob with each step
         along = start.lerp(end, i / max(count - 1, 1))
         target = Vector((along.x, along.y, lowest + HEIGHT * 0.5))
         camera.location = target + side * distance + Vector((0, 0, HEIGHT * 0.05))
         camera.rotation_euler = (target - camera.location).to_track_quat("-Z", "Y").to_euler()
+        depths.append((camera.location - hips[i]).dot(side))
         camera.keyframe_insert("location", frame=frame)
         camera.keyframe_insert("rotation_euler", frame=frame)
 
@@ -218,7 +243,8 @@ def main():
         nodes.clear()
         camera_data, ramp = nodes.new("ShaderNodeCameraData"), nodes.new("ShaderNodeMapRange")
         glow, output = nodes.new("ShaderNodeEmission"), nodes.new("ShaderNodeOutputMaterial")
-        ramp.inputs["From Min"].default_value, ramp.inputs["From Max"].default_value = distance - 0.55, distance + 0.75  # just around the runner, so near and far limbs differ
+        # just around the body over the whole clip, so near and far limbs differ and a dancer stepping closer doesn't vanish
+        ramp.inputs["From Min"].default_value, ramp.inputs["From Max"].default_value = min(depths) - 0.55, max(depths) + 0.75
         ramp.inputs["To Min"].default_value, ramp.inputs["To Max"].default_value = 1.0, 0.0
         links.new(camera_data.outputs["View Z Depth"], ramp.inputs["Value"])
         links.new(ramp.outputs["Result"], glow.inputs["Color"])
@@ -253,5 +279,8 @@ if __name__ == "__main__":
     assert stride_period(fake, 0.05) == 10, stride_period(fake, 0.05)
     looped = loop_motion(fake, 10, 25)
     assert looped[20, 0] == 10.0 and looped[20, 6] == fake[0, 6]
+    still = np.zeros((30, 7))
+    still[12:18, 6] = np.arange(6) * 20
+    assert busiest_window(still, 8) in (11, 12), busiest_window(still, 8)
     if "--" in sys.argv:
         main()
