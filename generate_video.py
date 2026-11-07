@@ -79,7 +79,7 @@ ANIMATE_STEPS = 10
 VACE_HIGH = "Wan2.2-VACE-Fun-A14B-high-noise-Q6_k.gguf"
 VACE_LOW = "Wan2.2-VACE-Fun-A14B-low-noise-Q6_K.gguf"
 NEGATIVE = (
-    "blurry, low quality, distorted, deformed, extra limbs, extra fingers, bad anatomy, "
+    "blurry, low quality, distorted, deformed, extra limbs, missing limbs, missing arms, arms fading away, fused limbs, extra fingers, bad anatomy, "
     "static, still frame, watermark, text, subtitles"
 )
 

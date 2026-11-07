@@ -7,6 +7,7 @@ the body forward each time. A moving body gets a side-on tracking camera; one th
 in front, turned 30 degrees.
 """
 import argparse
+import json
 import math
 import os
 import sys
@@ -14,6 +15,7 @@ import sys
 import bmesh
 import bpy
 import numpy as np
+from bpy_extras.object_utils import world_to_camera_view
 from mathutils import Matrix, Vector
 
 HEIGHT = 1.7  # metres, so framing doesn't depend on the capture's units
@@ -84,6 +86,11 @@ SHORTS = {"LeftUpLeg", "RightUpLeg"}
 SHOES = {"LeftFoot", "RightFoot", "LeftToeBase", "RightToeBase"}
 # skin, shirt, shorts, shoes, eyes: clothes like a person's help pose models find the body
 COLOURS = [(0.78, 0.6, 0.48), (0.18, 0.32, 0.55), (0.08, 0.08, 0.09), (0.9, 0.9, 0.92), (0.02, 0.02, 0.02)]
+
+
+# COCO keypoint index -> the bone whose head is that joint, for body_check.py
+JOINTS = {5: "LeftArm", 6: "RightArm", 7: "LeftForeArm", 8: "RightForeArm", 9: "LeftHand", 10: "RightHand",
+          11: "LeftUpLeg", 12: "RightUpLeg", 13: "LeftLeg", 14: "RightLeg", 15: "LeftFoot", 16: "RightFoot"}
 
 
 def plain_material(name, colour, roughness=0.6):
@@ -163,6 +170,7 @@ def main():
     parser.add_argument("--seconds", type=float, default=3)
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument("--speed", type=float, default=1.0, help="0.5 plays the motion at half speed, to make twice the real frames and speed it back up later")
+    parser.add_argument("--joints", help="also save where each joint is on screen in every frame, and whether the body hides it, as JSON")
     parser.add_argument("--depth", action="store_true", help="render distance from the camera (near is white) as a VACE control video")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
@@ -271,6 +279,23 @@ def main():
         except TypeError:
             continue
     scene.render.resolution_x, scene.render.resolution_y = 854, 480
+    if args.joints:
+        track, depsgraph = [], bpy.context.evaluated_depsgraph_get()
+        for frame in range(scene.frame_start, scene.frame_end + 1):
+            scene.frame_set(frame)
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            eye, joints = camera.matrix_world.translation, {}
+            for index, bone in JOINTS.items():
+                where = armature.matrix_world @ armature.pose.bones[bone].head
+                x, y, _ = world_to_camera_view(scene, camera, where)
+                ray = where - eye
+                # hidden when the ray from the camera meets the body well before the joint (more than a limb's thickness)
+                hit, _, _, _, thing, _ = scene.ray_cast(depsgraph, eye, ray.normalized(), distance=ray.length - HEIGHT * 0.06)
+                joints[index] = [round(x * 854, 1), round((1 - y) * 480, 1), not (hit and thing != floor)]
+            track.append(joints)
+        with open(args.joints, "w", encoding="utf-8") as f:
+            json.dump({"fps": args.fps, "size": [854, 480], "frames": track}, f)
+        print(f"Joints: {args.joints}", flush=True)
     if hasattr(scene.render.image_settings, "media_type"):  # Blender 5 splits video from image formats
         scene.render.image_settings.media_type = "VIDEO"
     scene.render.image_settings.file_format = "FFMPEG"

@@ -19,8 +19,9 @@ The user gives a prompt. If it's missing, ask for it. Don't ask about anything e
    - `--full` for 1280x704: much sharper, about 7 hours.
    - `--seconds N`: the default and longest is 2.5 (made at 32 real frames a second).
    - `--take 61_01` for a specific CMU motion, `--subject IMAGE` for their own picture of the subject.
+   - `--tries N` remakes it with a new seed while the body check fails, keeping the best; use 2 for full size.
    - `--pick-only` shows which motion it would use, in seconds, without making anything.
 
    Tell the user they can watch it at http://127.0.0.1:8190/progress.
 
-3. The output names the motion under `Motion:`, then `Review:` (and `Movement:` for a run), then `Best: <filename>`: the file is `$HOME/ComfyUI/output/video/<filename>`. Look at a few frames, then send it with SendUserFile. Say which motion it used, how long it took, and the review in plain words: jumps (frames that pop or morph), form breaks (frames where the body stops being a clear whole person) and smoothness from 0 to 1. If the prompt had no matching human motion, it was made with plain Wan 14B; say so. If the script exits with an error, tell the user what it said.
+3. The output names the motion under `Motion:`, then `Body (try N):` for each try, `Review:`, `Body:` (and `Movement:` for a run), then `Best: <filename>`: the file is `$HOME/ComfyUI/output/video/<filename>`. Look at a few frames, then send it with SendUserFile. Say which motion it used, how long it took, and the review in plain words: jumps (frames that pop or morph), form breaks (frames where the body stops being a clear whole person) and smoothness from 0 to 1, plus the body check: which limbs went missing and when, the share of frames with the body whole, and whether colours drifted from the subject image. If the prompt had no matching human motion, it was made with plain Wan 14B; say so. If the script exits with an error, tell the user what it said.

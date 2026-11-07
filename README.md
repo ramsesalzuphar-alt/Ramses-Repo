@@ -69,6 +69,12 @@ is a real one; Wan's 81-frame limit makes that 2.5 seconds at most. About 2 hour
 (1280x704). `--pick-only` shows the chosen motion. The `vace-video`
 skill runs it from a plain prompt.
 
+Every clip also gets a body check (`body_check.py clip.mp4 joints.json subject.png`). Blender saves where each joint is
+on screen and whether the body hides it (`mocap_render.py --joints`); each arm and leg segment it shows must be covered
+by the person's outline in the clip (Mask R-CNN), so a limb that fades into the background or melts is caught. A pose
+model can't do this, as it guesses joints it can't see. It also compares the person's colours with the subject image.
+`--tries N` remakes a clip with a new seed while fewer than 90% of frames have every limb in place, keeping the best.
+
 ## Sessions
 
 `--session NAME` saves your scene and clips in `~/ComfyUI/output/sessions`, so nothing you asked for gets lost.

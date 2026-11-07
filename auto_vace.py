@@ -3,7 +3,9 @@
 1. Picks the CMU motion capture take whose description best matches the action in the prompt, and downloads it.
 2. Renders it in Blender as a depth video (mocap_render.py --depth).
 3. Makes a quick Wan 5B clip of the prompt and takes its clearest whole-body frame as the subject's look.
-4. Runs VACE 14B (generate_video.py --vace) and reviews the result (grade_video.py --review).
+4. Runs VACE 14B (generate_video.py --vace) and reviews the result: smoothness (grade_video.py) and whether the body
+   stays whole and looks like the subject image (body_check.py, against Blender's own joint positions). With --tries,
+   a clip that loses limbs or drifts in colour is made again with a new seed, and the best one is kept.
 
 Wan 14B makes 16 frames a second, and filling the gaps with interpolation smears fast limbs. So the motion is rendered
 at half speed, made at 16 fps, and played back at 32 fps: every frame is a real one. 81 frames is Wan's limit, so
@@ -32,6 +34,7 @@ HISTORY = os.path.join(COMFY, "output", "history.jsonl")
 PLAN = os.path.join(COMFY, "output", "plan.json")
 SLOW = 0.5  # motion speed while generating; the clip is sped back up by 1 / SLOW
 MAX_FRAMES = 81
+GOOD_BODY = 0.9  # share of frames with every visible limb in place for a clip to pass the body check
 BLENDER = r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe"
 SOURCE = "https://raw.githubusercontent.com/meshula/cmu-mocap/master/"
 # words that say nothing about the movement
@@ -160,6 +163,7 @@ def main():
     parser.add_argument("--full", action="store_true", help="1280x704 instead of 832x480: sharper, about 4 times slower")
     parser.add_argument("--take", help="use this CMU take, such as 05_01, instead of picking one")
     parser.add_argument("--subject", help="use this image for the subject's look instead of making one")
+    parser.add_argument("--tries", type=int, default=1, help="make it again with a new seed, up to this many times, while the body check fails")
     parser.add_argument("--pick-only", action="store_true", help="show the motion it would use, then stop")
     args = parser.parse_args()
     longest = (MAX_FRAMES - 1) * SLOW / 16
@@ -190,12 +194,12 @@ def main():
     steps = [{"name": f"Motion: CMU {take} ({description})", "status": "done"},
              {"name": "Blender depth video", "status": "running", "eta": "about 1 min"},
              {"name": "Subject image (quick Wan 5B clip)", "status": "waiting", "eta": "about 3 min"},
-             {"name": "VACE 14B video", "status": "waiting", "comfy": True, "eta": "about 7 hours" if args.full else "about 2 hours"},
-             {"name": "Review", "status": "waiting", "eta": "about 5 min"}]
+             {"name": "VACE 14B video", "status": "waiting", "comfy": True, "eta": ("about 7 hours" if args.full else "about 2 hours") + (f" a try, up to {args.tries}" if args.tries > 1 else "")},
+             {"name": "Body and smoothness checks", "status": "waiting", "eta": "about 10 min"}]
     set_plan(steps)
-    control = os.path.join(MOCAP, f"{take}_depth.mp4")
+    control, joints = os.path.join(MOCAP, f"{take}_depth.mp4"), os.path.join(MOCAP, f"{take}_joints.json")
     render = subprocess.run([BLENDER, "-b", "-P", os.path.join(REPO, "mocap_render.py"), "--", bvh, control,
-                             "--seconds", str(made_seconds + 0.25), "--fps", "16", "--speed", str(SLOW), "--depth"], capture_output=True, text=True, errors="replace")
+                             "--seconds", str(made_seconds + 0.25), "--fps", "16", "--speed", str(SLOW), "--depth", "--joints", joints], capture_output=True, text=True, errors="replace")
     if render.returncode != 0 or not os.path.isfile(control):
         set_plan(steps, 1, "failed")
         sys.exit("Blender render failed:\n" + render.stdout[-1500:] + render.stderr[-1500:])
@@ -209,20 +213,34 @@ def main():
     set_plan(steps, 2, "done")
     print(f"Subject: {subject}", flush=True)
 
-    set_plan(steps, 3, "running")
-    made = generate([args.prompt, "--vace", control, "--subject", subject, "--seconds", str(made_seconds), "--steps", "20",
-                     "--tiled", "--crf", "12", "--no-smooth", "--session", "auto", *size])
-    if not made:
-        set_plan(steps, 3, "failed")
-        sys.exit("VACE generation failed")
-    clip = os.path.splitext(made)[0] + "_32fps.mp4"
-    speed_up(os.path.join(COMFY, "output", "video", made), os.path.join(COMFY, "output", "video", clip), round(16 / SLOW))
+    import body_check
+    best = None
+    for attempt in range(1, args.tries + 1):
+        set_plan(steps, 3, "running")
+        made = generate([args.prompt, "--vace", control, "--subject", subject, "--seconds", str(made_seconds), "--steps", "20",
+                         "--tiled", "--crf", "12", "--no-smooth", "--session", "auto", *size])
+        if not made:
+            set_plan(steps, 3, "failed")
+            sys.exit("VACE generation failed")
+        clip = os.path.splitext(made)[0] + "_32fps.mp4"
+        speed_up(os.path.join(COMFY, "output", "video", made), os.path.join(COMFY, "output", "video", clip), round(16 / SLOW))
+        set_plan(steps, 4, "running")
+        body = body_check.check(os.path.join(COMFY, "output", "video", clip), joints, subject)
+        print(f"Body (try {attempt}): " + json.dumps(body), flush=True)
+        if best is None or body["body_ok"] > best[1]["body_ok"]:
+            best = (clip, body)
+        drift = body["outfit_drift"] is not None and body["outfit_drift"] > body_check.COLOUR_DRIFT
+        if body["body_ok"] >= GOOD_BODY and not drift:
+            break
+        if attempt < args.tries:
+            print(f"Body check failed, making it again with a new seed", flush=True)
+    clip, body = best
     set_plan(steps, 3, "done")
 
-    set_plan(steps, 4, "running")
     import grade_video
     review = grade_video.review(os.path.join(COMFY, "output", "video", clip))
     print("Review: " + json.dumps(review), flush=True)
+    print("Body: " + body["summary"] + f" (whole in {body['body_ok']:.0%} of frames)", flush=True)
     if words(args.prompt) & {"run", "jog", "sprint"}:
         import motion_check  # its real-footage set is runners, so it only means something for a run
         print("Movement: " + json.dumps(motion_check.check(os.path.join(COMFY, "output", "video", clip))), flush=True)
