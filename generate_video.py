@@ -289,7 +289,7 @@ def estimate_minutes(entries, args):
 def add_finishing(workflow, width, height, tiled, upscale, smooth, target_fps=None):
     if target_fps:
         smooth = target_fps > workflow["10"]["inputs"]["fps"]
-    images = ["9", 0]
+    images = workflow["10"]["inputs"]["images"]
     if tiled:
         decode = workflow["9"]["inputs"]
         workflow["9"] = {"class_type": "VAEDecodeTiled", "inputs": {**decode, "tile_size": 512, "overlap": 64, "temporal_size": 64, "temporal_overlap": 8}}
@@ -729,6 +729,8 @@ if __name__ == "__main__":
     vace = build_vace_workflow("p", "s.png", "c.mp4", 49, 16.0, 832, 480, 1, 20)
     assert vace["8"]["inputs"]["end_at_step"] == 10 and vace["18"]["inputs"]["start_at_step"] == 10 and vace["9"]["inputs"]["samples"] == ["23", 0] and vace["10"]["inputs"]["images"] == ["24", 0]
     assert vace["22"]["inputs"]["control_video"] == ["21", 0] and vace["23"]["inputs"]["trim_amount"] == ["22", 3]
+    add_finishing(vace, 832, 480, True, False, True)
+    assert vace["34"]["inputs"]["images"] == ["24", 0] and vace["10"]["inputs"]["images"] == ["34", 0]
     assert best_settings([]) == BEST_PRESET
     assert best_settings([{"rating": 3, "settings": {"steps": 1}}]) == BEST_PRESET
     assert best_settings([{"rating": 5, "settings": {"steps": 1}}, {"rating": 5, "settings": {"steps": 2}}, {"settings": {"steps": 3}}]) == {"steps": 2, "smooth": True}
