@@ -617,6 +617,10 @@ def main():
         save_session(args.session, session)
     if args.crf is not None:
         workflow["11"]["inputs"].update({"format.codec": "h264", "format.codec.encoding": "re-encode", "format.codec.encoding.crf": args.crf})
+    if args.model == "animate":
+        # Animate caches its model in RAM, and on top of models kept from earlier jobs that overflowed 31 GB and stalled for hours
+        free = urllib.request.Request(SERVER + "/free", data=json.dumps({"unload_models": True, "free_memory": True}).encode(), headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(free, timeout=30).close()  # answers with an empty body, not JSON
     try:
         prompt_id = request("/prompt", {"prompt": workflow})["prompt_id"]
     except urllib.error.HTTPError as error:
