@@ -166,7 +166,10 @@ def main():
     parser.add_argument("--tries", type=int, default=1, help="make it again with a new seed, up to this many times, while the body check fails")
     parser.add_argument("--pick-only", action="store_true", help="show the motion it would use, then stop")
     args = parser.parse_args()
-    longest = (MAX_FRAMES - 1) * SLOW / 16
+    if os.name == "nt":  # keep the PC from sleeping for the hours this runs; Windows drops it when the script exits
+        import ctypes
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+    longest =(MAX_FRAMES - 1) * SLOW / 16
     if args.seconds > longest:
         print(f"Shortened to {longest:g} s: at 32 real frames a second, longer would pass Wan's {MAX_FRAMES}-frame limit", flush=True)
         args.seconds = longest
