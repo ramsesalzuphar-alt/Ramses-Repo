@@ -134,3 +134,16 @@ ledger["history"] += [dict(h, pnl=-200.0, ret=-0.02) for h in trades(30, 0)]   #
 app.graduation()
 assert "Crypto autopilot" not in app.S["graduates"] and any("lost its graduation" in l["msg"] for l in app.S["log"])
 print("graduation tests pass")
+
+# checks: crypto every time (5 min), congress filings at most every 30 min
+calls = {"congress": 0, "crypto": 0}
+copier.check_pelosi = lambda pending, log: calls.__setitem__("congress", calls["congress"] + 1)
+crypto_copier.check_crypto = lambda pending, log: calls.__setitem__("crypto", calls["crypto"] + 1) or []
+app.refresh_accounts = app.security_check = app.graduation = lambda: None
+app.last_congress = 0.0
+assert app.run_check() == 5 * 60
+app.run_check()
+assert calls == {"congress": 1, "crypto": 2}, calls
+app.last_congress -= 31 * 60; app.run_check()
+assert calls == {"congress": 2, "crypto": 3}, calls
+print("check interval tests pass")

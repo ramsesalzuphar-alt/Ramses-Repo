@@ -1,5 +1,5 @@
 """Trade Copier app: one page with buttons for everything. Run: python app.py, then open http://127.0.0.1:8765
-Checks every House member's trade filings and the top crypto traders every 30 minutes (or when you press Check now).
+Checks the top crypto traders every 5 minutes and every House member's trade filings every 30 (or when you press Check now).
 New trades wait for your Copy/Skip; exits of copied trades happen automatically. Paper money only.
 Relearns daily. Each market (crypto, stocks) has its own autopilot that copies STRONG trades by itself; it only unlocks
 once that market's live track record proves an edge, or runs as a paper experiment if you start it.
@@ -12,7 +12,9 @@ import copier, crypto_copier, learn, scout
 
 HERE = Path(__file__).parent
 APP_FILE = HERE / "app_state.json"  # waiting proposals + activity log, so a restart loses nothing
-PORT, CHECK_EVERY, RETRY_AFTER = 8765, 30 * 60, 2 * 60  # a failed check is retried after 2 min
+PORT, CHECK_EVERY, RETRY_AFTER = 8765, 5 * 60, 2 * 60  # crypto traders every 5 min; a failed check is retried after 2 min
+CONGRESS_EVERY = 30 * 60  # House filings change a few times a day: no need to download their index every 5 min
+last_congress = 0.0
 RETRAIN_EVERY, AUTO_MAX_PER_CHECK = 24 * 3600, 5
 EXPIRE_AFTER = 10 * 60  # seconds a crypto trade waits for you
 MARKETS = ("crypto", "stocks")
@@ -284,13 +286,16 @@ def refresh_accounts():
 
 
 def run_check():
+    global last_congress
     with lock:
         S["checking"] = True
         publish()
         try:
             expire()
             before = len(S["pending"])
-            copier.check_pelosi(S["pending"], log)
+            if time.time() - last_congress >= CONGRESS_EVERY:
+                copier.check_pelosi(S["pending"], log)
+                last_congress = time.time()
             S["traders"] = crypto_copier.check_crypto(S["pending"], log)
             for m in MARKETS:
                 guard(m)  # judge the trades that just closed before opening new ones
