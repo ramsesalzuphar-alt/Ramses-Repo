@@ -147,3 +147,9 @@ cc.SCOUT_FILE.write_text(json.dumps({"traders": {
 assert [a for a, _, _ in cc.high_winners()] == ["steady", "lucky"], cc.high_winners()
 assert abs(scout.wilson_low([1] * 45 + [-1] * 15) - cc.win_low(0.75, 60)) < 1e-12
 print("high winner tests pass")
+
+# patterns can be market conditions, and trades missing a condition still count for the others
+cond = [(i, {**f(), "regime": "BTC 7d: with trade"} if i % 2 else f(), 0.01 if i % 2 else -0.02) for i in range(60)]
+r = scout.judge(cond)
+assert "BTC 7d: with trade" in [p["when"] for p in r["patterns"]], r["patterns"]
+print("condition pattern tests pass")

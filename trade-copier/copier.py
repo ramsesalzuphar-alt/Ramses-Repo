@@ -2,7 +2,7 @@
 Used by app.py (the button UI). Full sales of stocks you hold are sold automatically; buys wait for your approval.
 Keys are read from .mcp.json (alpaca env block). Optional settings in .env: DOLLARS_PER_TRADE, POLITICIAN (one member's last name; default: every House member), MAX_FILING_AGE_DAYS.
 """
-import io, json, os, re, shutil, subprocess, tempfile, urllib.request, urllib.error, zipfile
+import io, json, os, re, shutil, statistics, subprocess, tempfile, urllib.request, urllib.error, zipfile
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -244,11 +244,24 @@ def trend_feature(sym_closes, spy_closes, day, kind):
     return {"trend": "with 20d trend" if rel > 0.03 else "against 20d trend" if rel < -0.03 else "flat 20d vs market"}
 
 
+def market_features(spy_closes, day, kind):
+    """The stock market's state in the 20 trading days before `day`: its trend relative to the trade (a sale in a
+    falling market is 'with trade'), and whether it was calm or volatile (SPY's annualized daily swings). {} if unknown."""
+    s = [c for d, c in spy_closes if d < day][-21:]
+    if len(s) < 21:
+        return {}
+    move = (s[-1] / s[0] - 1) * (-1 if "sale" in kind.lower() else 1)
+    swings = statistics.pstdev([s[i] / s[i - 1] - 1 for i in range(1, 21)]) * 252 ** 0.5
+    return {"market": "market 20d: with trade" if move > 0.03 else "market 20d: against trade" if move < -0.03 else "market 20d: flat",
+            "volatility": "volatile market" if swings > 0.20 else "calm market"}
+
+
 def stock_features(t, closes, day):
     """Traits learn.py learns from and the live copier scores on (same function for both): size, kind, filing lag,
     the member (so each member gets their own model), and the stock's trend vs the market before `day`."""
     return {**pelosi_features(t), "trader": "member " + t["Representative"],
-            **trend_feature(closes.get(t["Ticker"], []), closes.get("SPY", []), day, t["Transaction"])}
+            **trend_feature(closes.get(t["Ticker"], []), closes.get("SPY", []), day, t["Transaction"]),
+            **market_features(closes.get("SPY", []), day, t["Transaction"])}
 
 
 def is_auto(src):

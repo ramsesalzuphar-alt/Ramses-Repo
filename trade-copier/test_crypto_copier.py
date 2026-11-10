@@ -133,3 +133,20 @@ ac.hl = lambda body: {"BTC": "55000", "ETH": "1900"}     # BTC +10% (+$10), ETH 
 a = ac.crypto_account()
 assert a["invested"] == 300 and abs(a["value"] - 320) < 1e-9, (a["invested"], a["value"])
 print("account total tests pass")
+
+# market conditions: whole-market regime (BTC's week, side-relative) and the real-world mood (Fear & Greed)
+mc = importlib.reload(cc)
+H1 = mc.HOUR
+t0 = 1_000 * H1
+btc = {t0 - H1: 110.0, t0 - 7 * 24 * H1: 100.0}                  # BTC +10% over the week
+assert mc.regime_feature(btc, t0 + 5, "long") == {"regime": "BTC 7d: with trade"}
+assert mc.regime_feature(btc, t0 + 5, "short") == {"regime": "BTC 7d: against trade"}
+assert mc.regime_feature({}, t0, "long") == {}
+mc.http = lambda m, url, h, body=None: (200, {"data": [{"value": "12", "timestamp": "1794268800"}, {"value": "80", "timestamp": "1794182400"}]})
+mc._fng["at"] = 0
+fng = mc.fear_greed()
+assert fng == {"2026-11-10": 12, "2026-11-09": 80}, fng
+assert mc.sentiment_feature(fng, 1794268800 * 1000 + 3600_000) == {"sentiment": "extreme fear"}
+assert mc.sentiment_feature(fng, 1794182400 * 1000) == {"sentiment": "extreme greed"}
+assert mc.sentiment_feature(fng, 0) == {}
+print("market condition tests pass")

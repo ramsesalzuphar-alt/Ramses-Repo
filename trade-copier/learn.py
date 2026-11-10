@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 from copier import (http, load_env, fetch_trades, stock_features, predict, predict_for_trader, daily_closes, stock_history,
                     MODEL_FILE, CONGRESS_CACHE, STOCK_EVENTS)
 from crypto_copier import (top_traders, crypto_features, is_new_position, candles_5m, minute_features, load_ledger,
-                           watchlist, high_winners, EVENTS_FILE, FEE)
+                           watchlist, high_winners, fear_greed, sentiment_feature, regime_feature, EVENTS_FILE, FEE)
 
 G, R, B, D, X = "\033[32m", "\033[31m", "\033[1m", "\033[2m", "\033[0m"  # terminal colors
 H = 3_600_000  # one hour in ms
@@ -212,7 +212,11 @@ def crypto_samples(n_traders=60, per_trader=300):
     logged = logged_events()
     # (time the outcome is measured from, trader, coin, side, time the trader actually entered)
     opens += [(e["t"], e["addr"], e["coin"], e["side"], e.get("entered_at") or e["t"]) for e in logged]
-    coins = {o[2] for o in opens}
+    coins = {o[2] for o in opens} | {"BTC"}  # BTC: the whole-market regime for every trade
+    try:
+        fng = fear_greed()
+    except Exception:
+        fng = {}  # mood unavailable: learn without it this time
     print(f"\n  + {len(logged)} positions the app logged; fetching hourly prices...", flush=True)
     closes = hourly_closes(coins, since - 2 * 24 * H, now)
     print(f"  fetching 5-minute candles (last ~17 days) for the minutes-before patterns...", flush=True)
@@ -230,6 +234,8 @@ def crypto_samples(n_traders=60, per_trader=300):
         if res:
             feats = crypto_features(side, coin, addr, res[0])
             feats.update(minute_features(five.get(coin, []), entered, side))  # {} when older than the 5m candles reach
+            feats.update(regime_feature(closes.get("BTC", {}), entered, side))
+            feats.update(sentiment_feature(fng, entered))
             out.append((feats, res[1]))
     # its own closed paper trades, with their REAL results: what it actually won and lost
     own = [(h["feats"], h["ret"]) for h in load_ledger()["history"] if h.get("feats") and "ret" in h]

@@ -211,3 +211,13 @@ assert cp.foreign_orders() == ["buy TSLA at 2026-11-10 18:05 UTC"], cp.foreign_o
 cp.reset_orders(); account[:] = []
 assert cp.foreign_orders() == []
 print("breach watch tests pass")
+
+# stock market conditions: SPY's 20-day trend relative to the trade, and calm vs volatile
+spy_up = [(f"2026-09-{i:02d}", 100 * 1.003 ** i) for i in range(1, 30)]     # steady climb, low swings
+assert cp.market_features(spy_up, "2026-09-28", "Purchase") == {"market": "market 20d: with trade", "volatility": "calm market"}
+assert cp.market_features(spy_up, "2026-09-28", "Sale")["market"] == "market 20d: against trade"
+choppy = [(f"2026-09-{i:02d}", 100 * (1.03 if i % 2 else 0.97)) for i in range(1, 30)]
+assert cp.market_features(choppy, "2026-09-28", "Purchase")["volatility"] == "volatile market"
+assert cp.market_features(spy_up, "2026-09-10", "Purchase") == {}
+assert "volatility" in cp.stock_features(mk("Bob Big", "BBB", "Purchase", "$1,001 -"), {"SPY": spy_up}, "2026-09-28")
+print("stock market condition tests pass")

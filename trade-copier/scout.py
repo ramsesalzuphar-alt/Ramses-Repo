@@ -9,7 +9,7 @@ import json, os, statistics, time
 from array import array
 from datetime import datetime
 import learn
-from crypto_copier import SCOUT_FILE, SCOUT_VERSION, FEE, win_low, leaderboard, crypto_features, is_new_position
+from crypto_copier import SCOUT_FILE, SCOUT_VERSION, FEE, win_low, leaderboard, fear_greed, sentiment_feature, regime_feature, crypto_features, is_new_position
 
 H = learn.H
 MIN_TRADES, PARTS, MIN_WIN = 30, 3, 0.55  # consistent trader: 30+ graded copies; each third of their history won 55%+ and made money
@@ -215,8 +215,9 @@ def judge(graded):
         out["consistent"] = all(good(p, MIN_WIN) for p in parts) and wilson_low(rs) > 0.5
     by = {}
     for _, f, r in graded:
-        for k in ("side", "trend", "coin"):
-            by.setdefault(f[k], []).append(r)
+        for k in ("side", "trend", "coin", "regime", "sentiment"):
+            if k in f:  # regime/sentiment can be missing (no BTC prices or mood for that day)
+                by.setdefault(f[k], []).append(r)
     for v, prs in by.items():
         half = len(prs) // 2
         if len(prs) >= PAT_MIN and good(prs[:half], PAT_WIN) and good(prs[half:], PAT_WIN) and wilson_low(prs) > 0.5:
@@ -230,17 +231,24 @@ def scan(addr, prices):
     now = int(time.time() * 1000)
     os_, pages = opens(addr)
     os_ = [o for o in os_ if o[0] < now - H]  # fast bots' last-minutes trades can't be copied or graded: skip fetching prices for them
-    coins = {o[1] for o in os_}
+    coins = {o[1] for o in os_} | ({"BTC"} if os_ else set())  # BTC: the market's week, for the regime
     stale = {c for c in coins if time.time() - prices.get(c, (0, None))[0] > PRICES_FOR}
     for c, cs in hourly(stale, now - 202 * 24 * H, now).items():
         prices[c] = (time.time(), cs)
     candles = {c: prices[c][1] for c in coins if c in prices}
     closes = {c: {cs[0] + i * H: v for i, v in enumerate(cs[3])} for c, cs in candles.items()}  # the form learn.copy_result reads
+    try:
+        mood = fear_greed()
+    except Exception:
+        mood = {}
     graded = []
     for t, coin, side, *_ in os_:
         res = learn.copy_result(closes, coin, t, side)
         if res:
-            graded.append((t, crypto_features(side, coin, addr, res[0]), res[1]))
+            f = crypto_features(side, coin, addr, res[0])
+            f.update(regime_feature(closes.get("BTC", {}), t, side))
+            f.update(sentiment_feature(mood, t))
+            graded.append((t, f, res[1]))
     return {**judge(graded), "exit": learn_exit(os_, candles, now), "pages": pages}
 
 
