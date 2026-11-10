@@ -4,7 +4,7 @@ Keys are read from .mcp.json (alpaca env block). Optional settings in .env: DOLL
 """
 import io, json, os, re, shutil, subprocess, tempfile, urllib.request, urllib.error, zipfile
 import xml.etree.ElementTree as ET
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -12,6 +12,7 @@ SEEN_FILE = HERE / "seen.json"
 DOCS_FILE = HERE / "seen_docs.json"  # filing PDFs already read, so each is downloaded once
 SOURCES_FILE = HERE / "stock_sources.json"  # {symbol: {rep, auto, opened, feats}}: who you copied each stock from
 STOCK_HISTORY = HERE / "stock_history.json"  # closed stock copies with their real results: learned from, and the loss guard
+MY_ORDERS = HERE / "my_orders.json"  # IDs of every order the copier placed: any other order means someone else has your keys
 STOCK_EVENTS = HERE / "stock_events.jsonl"  # every congressional trade scored, copied or not: graded ~30 days later
 CONGRESS_CACHE = HERE / "congress_cache.json"  # parsed filings by ID, so learning reads each PDF once
 STOCK_STOP, STOCK_MAX_DAYS = 0.03, 30  # autopilot stock copies: stop loss -3%, close after 30 days (the learned horizon)
@@ -341,13 +342,52 @@ def decide_pelosi(item, auto=False):
     _, action = plan_order(item["trade"], float(os.environ.get("DOLLARS_PER_TRADE", "1000")))
     if action[0] == "POST" and alpaca("GET", f"/v2/assets/{action[2]['symbol']}")[0] != 200:
         return f"Alpaca can't trade {action[2]['symbol']}, skipped"
-    st, r = alpaca(*action)
+    st, r = place(*action)
     if st < 300 and action[0] == "POST":  # remember who you copied it from: their full sale sells it automatically
         sources = json.loads(SOURCES_FILE.read_text()) if SOURCES_FILE.exists() else {}
         sources[action[2]["symbol"]] = {"rep": item["trade"].get("Representative"), "auto": auto,
                                          "opened": datetime.now().isoformat(timespec="seconds"), "feats": item.get("feats")}
         SOURCES_FILE.write_text(json.dumps(sources))
     return f"Done: {item['label']}" if st < 300 else f"Failed ({st}): {r}"
+
+
+def my_orders():
+    try:
+        return json.loads(MY_ORDERS.read_text())
+    except (OSError, json.JSONDecodeError):  # first run: watch from now on (older orders can't be told apart)
+        mine = {"since": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "ids": []}
+        MY_ORDERS.write_text(json.dumps(mine))
+        return mine
+
+
+def reset_orders():
+    """After you rotate your keys: start watching again from now."""
+    MY_ORDERS.unlink(missing_ok=True)
+    my_orders()
+
+
+def place(method, path, body=None):
+    """Send an order to Alpaca and remember its ID as the copier's own (POST /orders and DELETE /positions both return one)."""
+    st, r = alpaca(method, path, body)
+    if st < 300 and isinstance(r, dict) and r.get("id"):
+        mine = my_orders()
+        mine["ids"].append(r["id"])
+        MY_ORDERS.write_text(json.dumps(mine))
+    return st, r
+
+
+def foreign_orders():
+    """Orders in your Alpaca paper account that the copier didn't place, since it started watching.
+    Only the copier should trade there, so any of these means someone else may be using your keys
+    (or you traded on the Alpaca website yourself)."""
+    load_env()
+    mine = my_orders()
+    st, orders = alpaca("GET", f"/v2/orders?status=all&after={mine['since']}&limit=500&direction=desc")
+    if st != 200:
+        return []
+    known = set(mine["ids"])
+    return [f"{o.get('side', '?')} {o.get('symbol', '?')} at {o.get('created_at', '?')[:16].replace('T', ' ')} UTC"
+            for o in orders if o.get("id") not in known]
 
 
 def stock_history():
@@ -361,7 +401,7 @@ def close_stock(sym, why, sources, log, pos=None):
     """Sell the whole position, and record its real result (learned from; judged by the loss guard).
     Returns the P&L, or None if the order failed. `sources` is updated; the caller saves it."""
     pos = pos or alpaca("GET", f"/v2/positions/{sym}")[1]
-    st, r = alpaca("DELETE", f"/v2/positions/{sym}")
+    st, r = place("DELETE", f"/v2/positions/{sym}")
     if st >= 300:
         log(f"Selling {sym} failed ({st}), will retry")
         return None

@@ -18,7 +18,7 @@ EXPIRE_AFTER = 10 * 60  # seconds a crypto trade waits for you
 MARKETS = ("crypto", "stocks")
 # loss guard: last 10 autopilot trades losing more than ~1% each on average -> pause + relearn ($100 crypto, $1000 stock copies)
 GUARD_LAST, GUARD_MAX_TRIPS, GUARD_LOSS = 10, 3, {"crypto": -10.0, "stocks": -100.0}
-KEEP = ("pending", "log", "traders", "last_check", "ap")
+KEEP = ("pending", "log", "traders", "last_check", "ap", "security")
 NEW_AP = {"on": False, "forced": False, "guard_since": "", "guard_trips": [], "resume": False}
 
 lock = threading.RLock()
@@ -27,7 +27,7 @@ saved = json.loads(APP_FILE.read_text()) if APP_FILE.exists() else {}
 if "ap" not in saved and "autopilot" in saved:  # state saved before stocks had an autopilot: it was crypto's
     saved["ap"] = {"crypto": {"on": saved["autopilot"], "forced": saved.get("forced", False), "guard_since": saved.get("guard_since", ""),
                               "guard_trips": saved.get("guard_trips", []), "resume": saved.get("resume_after_retrain", False)}}
-S = {"pending": [], "log": [], "traders": [], "last_check": None, **{k: v for k, v in saved.items() if k in KEEP},
+S = {"pending": [], "log": [], "traders": [], "last_check": None, "security": [], **{k: v for k, v in saved.items() if k in KEEP},
      "crypto": None, "stocks": None, "next_check": None, "checking": False, "error": None, "training": False,
      "model": None, "auto": {}, "scout": None}
 S["ap"] = {m: {**NEW_AP, **S.get("ap", {}).get(m, {})} for m in MARKETS}
@@ -173,6 +173,19 @@ def publish():
     snapshot = json.dumps(S).encode()
 
 
+def security_check():
+    """Alpaca orders the copier didn't place mean someone else may have your keys: flag each new one once."""
+    try:
+        foreign = copier.foreign_orders()
+    except Exception:
+        return  # can't reach Alpaca: check again next time
+    new = [o for o in foreign if o not in S["security"]]
+    if new:
+        log(f"SECURITY: {len(new)} order(s) in your Alpaca paper account the copier didn't place: {'; '.join(new)}. "
+            "If you didn't place them, rotate your Alpaca keys now.")
+    S["security"] = foreign
+
+
 def scout_summary():
     """What the page shows about the edge scout: progress through all traders, and its most consistent finds."""
     try:
@@ -211,6 +224,7 @@ def run_check():
             for m in MARKETS:
                 guard(m)  # judge the trades that just closed before opening new ones
                 run_autopilot(m)
+            security_check()
             added = len(S["pending"]) - before
             log(f"Checked: {added} new trade(s) to review" if added > 0 else "Checked: nothing new")
             S["error"] = None
@@ -346,6 +360,13 @@ class Handler(BaseHTTPRequestHandler):
             msg = "Checking now..."
         elif self.path == "/api/autopilot":
             msg = set_autopilot(bool(body.get("on")), bool(body.get("force")), str(body.get("market") or "crypto"))
+        elif self.path == "/api/security_reset":
+            with lock:
+                copier.reset_orders()
+                S["security"] = []
+                log("Security alert cleared (keys rotated); watching for unknown orders from now on")
+                publish()
+            msg = "Alert cleared"
         elif self.path == "/api/retrain":
             if S["training"]:
                 msg = "Already relearning"

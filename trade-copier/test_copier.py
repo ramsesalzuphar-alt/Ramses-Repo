@@ -102,7 +102,7 @@ print("per-trader tests pass")
 import json as _json, tempfile as _tf, pathlib as _pl, copier as cp
 d = _pl.Path(_tf.mkdtemp())
 cp.SEEN_FILE, cp.DOCS_FILE, cp.SOURCES_FILE = d / "seen.json", d / "docs.json", d / "src.json"
-cp.STOCK_EVENTS, cp.STOCK_HISTORY = d / "events.jsonl", d / "hist.json"   # never the real files
+cp.STOCK_EVENTS, cp.STOCK_HISTORY, cp.MY_ORDERS = d / "events.jsonl", d / "hist.json", d / "orders.json"   # never the real files
 cp.load_model = lambda name: None
 mk = lambda rep, sym, kind, rng: {"Representative": rep, "Last": rep.split()[-1], "Ticker": sym, "AssetType": "ST",
                                   "Transaction": kind, "TransactionDate": "11/01/2026", "ReportDate": "11/05/2026", "Range": rng}
@@ -192,3 +192,22 @@ print("learn resilience tests pass")
 assert not learn.has_edge([0.0002] * 30, [-0.0005] * 30)   # the stock model's +0.02% vs -0.05%: noise
 assert learn.has_edge([0.006] * 30, [-0.01] * 30) and not learn.has_edge([0.006] * 30, [0.01] * 30)
 print("edge threshold tests pass")
+
+# breach watch: the copier's own orders are remembered; any other order in the account is flagged; reset clears it
+cp.MY_ORDERS.unlink(missing_ok=True)
+account = []
+def fake_alpaca2(m, path, body=None):
+    if m == "POST" or m == "DELETE":
+        o = {"id": f"mine{len(account)}", "side": "buy" if m == "POST" else "sell", "symbol": "AAA", "created_at": "2026-11-10T17:00:00Z"}
+        account.append(o); return 200, o
+    if path.startswith("/v2/orders"):
+        assert "after=" in path; return 200, account
+    return 200, {}
+cp.alpaca, cp.load_env = fake_alpaca2, (lambda: None)
+cp.place("POST", "/v2/orders", {}); cp.place("DELETE", "/v2/positions/AAA")
+assert cp.foreign_orders() == []                       # only the copier traded: nothing flagged
+account.append({"id": "stranger", "side": "buy", "symbol": "TSLA", "created_at": "2026-11-10T18:05:00Z"})
+assert cp.foreign_orders() == ["buy TSLA at 2026-11-10 18:05 UTC"], cp.foreign_orders()
+cp.reset_orders(); account[:] = []
+assert cp.foreign_orders() == []
+print("breach watch tests pass")

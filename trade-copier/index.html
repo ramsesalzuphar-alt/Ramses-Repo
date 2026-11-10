@@ -353,7 +353,11 @@ function render(s) {
   busy = s.checking;
   $("status").textContent = s.checking ? "Checking…" : `Last check ${s.last_check || "—"}` + (s.next_check ? ` · next ${s.next_check}` : "");
   $("check").disabled = s.checking;
-  set("error", s.error ? `<div class="banner">${esc(s.error)}</div>` : "");
+  set("error", (s.security && s.security.length ? `<div class="banner"><b>Rotate your Alpaca keys now.</b> Your paper account has
+      ${s.security.length} order(s) the copier didn't place: ${s.security.slice(0, 5).map(esc).join("; ")}${s.security.length > 5 ? "…" : ""}.
+      If you placed them yourself on the Alpaca website, ignore this. Otherwise someone else is using your keys: regenerate them on Alpaca,
+      put the new ones in .mcp.json, then <button class="small" data-secreset="1">I've rotated my keys</button></div>` : "")
+    + (s.error ? `<div class="banner">${esc(s.error)}</div>` : ""));
   document.title = s.pending.length ? `(${s.pending.length}) Trade Copier` : "Trade Copier";
   for (const mk of ["crypto", "stocks"]) {
     const mine = s.pending.filter(p => (p.kind === "crypto") === (mk === "crypto"))
@@ -401,6 +405,7 @@ document.addEventListener("click", e => {
   else if (b.dataset.auto) { b.disabled = true; post("/api/autopilot", {on: b.dataset.auto === "on", force: b.dataset.force === "1", market: b.dataset.market}); }
   else if (b.dataset.tabbtn) showTab(b.dataset.tabbtn);
   else if (b.dataset.retrain) { b.disabled = true; post("/api/retrain"); }
+  else if (b.dataset.secreset) { b.disabled = true; post("/api/security_reset"); }
 });
 showTab(tab); load(); setInterval(load, 5000);
 </script>
