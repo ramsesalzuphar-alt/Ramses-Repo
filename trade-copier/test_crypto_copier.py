@@ -150,3 +150,20 @@ assert mc.sentiment_feature(fng, 1794268800 * 1000 + 3600_000) == {"sentiment": 
 assert mc.sentiment_feature(fng, 1794182400 * 1000) == {"sentiment": "extreme greed"}
 assert mc.sentiment_feature(fng, 0) == {}
 print("market condition tests pass")
+
+# hl: retries rate limits (429) and dropped connections, then gives up
+rq = importlib.reload(cc); rq.time.sleep = lambda s: None
+calls = []
+def flaky(m, url, h, body=None):
+    calls.append(1)
+    if len(calls) == 1: raise OSError("reset")
+    if len(calls) == 2: return 429, None
+    return 200, {"ok": True}
+rq.http = flaky
+assert rq.hl({}) == {"ok": True} and len(calls) == 3
+rq.http = lambda m, url, h, body=None: (429, None)
+try:
+    rq.hl({}); assert False, "should give up"
+except RuntimeError as e:
+    assert "429" in str(e)
+print("request retry tests pass")

@@ -89,14 +89,17 @@ def watchlist(k=WATCH_MAX):
 
 
 def hl(body):
-    for wait in (1, 3):  # this network drops Hyperliquid lookups now and then: two quick retries before giving up
+    """One Hyperliquid request. Retries dropped connections (this network drops them now and then) and rate limits
+    (429, when the scout or a relearn is busy too), then gives up."""
+    for wait in (1, 3, 10, None):
         try:
             st, d = http("POST", "https://api.hyperliquid.xyz/info", {}, body)
-            break
+            if st != 429 or wait is None:
+                break
         except OSError:
-            time.sleep(wait)
-    else:
-        st, d = http("POST", "https://api.hyperliquid.xyz/info", {}, body)
+            if wait is None:
+                raise
+        time.sleep(wait)
     if st != 200:
         raise RuntimeError(f"Hyperliquid error {st}: {d}")
     return d
