@@ -168,7 +168,7 @@ def main():
     args = parser.parse_args()
     if os.name == "nt":  # keep the PC from sleeping for the hours this runs; Windows drops it when the script exits
         import ctypes
-        ctypes.windll.kernel32.SetThreadExecutionState(0x80000001)  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000003)  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED: Modern Standby sleeps when the screen goes off
     longest =(MAX_FRAMES - 1) * SLOW / 16
     if args.seconds > longest:
         print(f"Shortened to {longest:g} s: at 32 real frames a second, longer would pass Wan's {MAX_FRAMES}-frame limit", flush=True)
