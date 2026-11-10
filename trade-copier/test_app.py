@@ -111,3 +111,26 @@ app.S["pending"] = [{"title": "old", "seen_at": now_ms - 11 * 60_000}, {"title":
 app.expire()
 assert [x["title"] for x in app.S["pending"]] == ["fresh", "pelosi"] and "Expired 1" in app.S["log"][0]["msg"], app.S["pending"]
 print("expire tests pass")
+
+# graduation: judged on autopilot's own closed paper trades; all five tests; announced when gained and when lost
+from datetime import datetime as _d2, timedelta as _t2
+def trades(n, ret, days=40, src="0xabc0000000000000000000000000000000000def"):
+    t0 = _d2(2099, 3, 1)
+    return [{"time": (t0 + _t2(days=days * i / max(n - 1, 1))).isoformat(), "auto": True, "pnl": ret * 100, "ret": ret,
+             "source": src} for i in range(n)]
+g = app.grade(trades(60, 0.01))
+assert g["ok"] and g["n"] == 60 and g["days"] == 40, g
+assert not app.grade(trades(40, 0.01))["checks"]["50+ trades"]
+assert not app.grade(trades(60, 0.01, days=10))["checks"]["30+ days"]
+assert not app.grade(trades(60, 0.002))["checks"]["avg +0.5%+"]
+late_loss = trades(60, 0.02); late_loss[40:] = [dict(h, pnl=-1.0, ret=-0.01) for h in late_loss[40:]]
+assert not app.grade(late_loss)["checks"]["profitable every third"]   # one good stretch isn't enough
+ledger["history"] = trades(60, 0.01); stock_hist.clear()
+app.S["graduates"] = []; app.S["log"] = []
+app.graduation()
+assert "Crypto autopilot" in app.S["graduates"] and "Crypto: copy 0xabc0..0def" in app.S["graduates"], app.S["graduates"]
+assert any("GRADUATED: 'Crypto autopilot'" in l["msg"] for l in app.S["log"])
+ledger["history"] += [dict(h, pnl=-200.0, ret=-0.02) for h in trades(30, 0)]   # a bad run afterwards
+app.graduation()
+assert "Crypto autopilot" not in app.S["graduates"] and any("lost its graduation" in l["msg"] for l in app.S["log"])
+print("graduation tests pass")

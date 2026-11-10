@@ -216,6 +216,8 @@ def pelosi_features(t):
 def daily_closes(symbols, start, end):
     """{symbol: [(YYYY-MM-DD, split-adjusted close), ...]} from Alpaca market data (your paper keys work), 100 symbols a call."""
     h = {"APCA-API-KEY-ID": os.environ["ALPACA_KEY"], "APCA-API-SECRET-KEY": os.environ["ALPACA_SECRET"]}
+    if end >= date.today().isoformat():  # the free plan refuses the last 15 minutes of data (403), so stop just before
+        end = (datetime.now(timezone.utc) - timedelta(minutes=16)).strftime("%Y-%m-%dT%H:%M:%SZ")
     out, syms = {}, sorted(symbols)
     for i in range(0, len(syms), 100):
         token = None
@@ -256,12 +258,34 @@ def market_features(spy_closes, day, kind):
             "volatility": "volatile market" if swings > 0.20 else "calm market"}
 
 
+# global influences, read from funds Alpaca prices: (name, fund, move that counts as rising/falling over 20 trading days,
+# inverted: bond prices fall when rates rise)
+GLOBAL = (("dollar", "UUP", 0.015, False), ("rates", "TLT", 0.03, True), ("oil", "USO", 0.08, False),
+          ("gold", "GLD", 0.04, False), ("world stocks", "EFA", 0.04, False), ("fear gauge", "VIXY", 0.15, False))
+GLOBAL_SYMBOLS = {sym for _, sym, _, _ in GLOBAL}
+
+
+def global_features(closes, day, side):
+    """The world in the 20 trading days before `day` (YYYY-MM-DD): dollar, interest rates, oil, gold, stocks outside
+    the US, and the fear gauge, each rising / falling / flat. Tagged with the trade's side (long/short, buy/sell)
+    because the additive model can't otherwise learn that a rising dollar helps one side and hurts the other."""
+    out = {}
+    for name, sym, threshold, inverted in GLOBAL:
+        s = [c for d, c in closes.get(sym, []) if d < day][-21:]
+        if len(s) < 21:
+            continue
+        move = (s[-1] / s[0] - 1) * (-1 if inverted else 1)
+        out[name] = f"{name} {'rising' if move > threshold else 'falling' if move < -threshold else 'flat'} · {side}"
+    return out
+
+
 def stock_features(t, closes, day):
     """Traits learn.py learns from and the live copier scores on (same function for both): size, kind, filing lag,
     the member (so each member gets their own model), and the stock's trend vs the market before `day`."""
     return {**pelosi_features(t), "trader": "member " + t["Representative"],
             **trend_feature(closes.get(t["Ticker"], []), closes.get("SPY", []), day, t["Transaction"]),
-            **market_features(closes.get("SPY", []), day, t["Transaction"])}
+            **market_features(closes.get("SPY", []), day, t["Transaction"]),
+            **global_features(closes, day, "buy" if t["Transaction"] == "Purchase" else "sell")}
 
 
 def is_auto(src):
@@ -305,7 +329,7 @@ def check_pelosi(pending, log):
         DOCS_FILE.write_text(json.dumps(sorted(docs)))
     today = date.today().isoformat()
     try:  # prices for the trend-before-filing feature, all symbols in one go
-        closes = daily_closes({t["Ticker"] for t in trades if t["Ticker"]} | {"SPY"},
+        closes = daily_closes({t["Ticker"] for t in trades if t["Ticker"]} | {"SPY"} | GLOBAL_SYMBOLS,
                               (date.today() - timedelta(days=45)).isoformat(), today) if trades and model else {}
     except Exception:
         closes = {}

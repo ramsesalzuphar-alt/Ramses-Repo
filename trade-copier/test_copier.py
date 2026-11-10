@@ -221,3 +221,14 @@ assert cp.market_features(choppy, "2026-09-28", "Purchase")["volatility"] == "vo
 assert cp.market_features(spy_up, "2026-09-10", "Purchase") == {}
 assert "volatility" in cp.stock_features(mk("Bob Big", "BBB", "Purchase", "$1,001 -"), {"SPY": spy_up}, "2026-09-28")
 print("stock market condition tests pass")
+
+# global influences: each fund's 20-day move -> rising / falling / flat, rates inverted from bond prices, tagged by side
+days20 = [f"2026-09-{i:02d}" for i in range(1, 30)]
+world = {"UUP": [(d, 100 * 1.002 ** i) for i, d in enumerate(days20)],    # dollar +4%: rising
+         "TLT": [(d, 100 * 0.997 ** i) for i, d in enumerate(days20)],    # bonds -6%: rates rising
+         "USO": [(d, 100.0) for d in days20]}                             # oil flat; gold etc. missing: left out
+g = cp.global_features(world, "2026-09-28", "long")
+assert g == {"dollar": "dollar rising · long", "rates": "rates rising · long", "oil": "oil flat · long"}, g
+assert cp.global_features(world, "2026-09-10", "sell") == {}             # not 20 trading days of history yet
+assert cp.stock_features(mk("Bob Big", "BBB", "Sale", "$1,001 -"), world, "2026-09-28")["dollar"] == "dollar rising · sell"
+print("global influence tests pass")

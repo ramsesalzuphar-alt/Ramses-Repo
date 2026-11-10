@@ -20,7 +20,7 @@ MARKETS = ("crypto", "stocks")
 GUARD_LAST, GUARD_MAX_TRIPS, GUARD_LOSS = 10, 3, {"crypto": -10.0, "stocks": -100.0}
 BASE_SIZE = {"crypto": ("CRYPTO_DOLLARS_PER_TRADE", "100"), "stocks": ("DOLLARS_PER_TRADE", "1000")}  # .env setting, default
 STAKE_BLOCK, STAKE_MAX = 10, 4  # autopilot earns x2..x4 trade size by its latest blocks of 10 closed trades each making money
-KEEP = ("pending", "log", "traders", "last_check", "ap", "security")
+KEEP = ("pending", "log", "traders", "last_check", "ap", "security", "graduates")
 NEW_AP = {"on": False, "forced": False, "guard_since": "", "guard_trips": [], "resume": False}
 
 lock = threading.RLock()
@@ -29,7 +29,7 @@ saved = json.loads(APP_FILE.read_text()) if APP_FILE.exists() else {}
 if "ap" not in saved and "autopilot" in saved:  # state saved before stocks had an autopilot: it was crypto's
     saved["ap"] = {"crypto": {"on": saved["autopilot"], "forced": saved.get("forced", False), "guard_since": saved.get("guard_since", ""),
                               "guard_trips": saved.get("guard_trips", []), "resume": saved.get("resume_after_retrain", False)}}
-S = {"pending": [], "log": [], "traders": [], "last_check": None, "security": [], **{k: v for k, v in saved.items() if k in KEEP},
+S = {"pending": [], "log": [], "traders": [], "last_check": None, "security": [], "graduates": [], "grad": [], **{k: v for k, v in saved.items() if k in KEEP},
      "crypto": None, "stocks": None, "next_check": None, "checking": False, "error": None, "training": False,
      "model": None, "auto": {}, "scout": None, "accounts_at": None}
 S["ap"] = {m: {**NEW_AP, **S.get("ap", {}).get(m, {})} for m in MARKETS}
@@ -49,6 +49,60 @@ def closed_trades(m):
                 sum(bool(p.get("auto")) for p in ledger["positions"].values()))
     sources = json.loads(copier.SOURCES_FILE.read_text()) if copier.SOURCES_FILE.exists() else {}
     return [h for h in copier.stock_history() if h.get("auto")], sum(copier.is_auto(v) for v in sources.values())
+
+
+GRAD_TRADES, GRAD_DAYS, GRAD_AVG = 50, 30, 0.005  # graduation: 50+ closed paper trades over 30+ days averaging +0.5%+
+
+
+def grade(trades):
+    """Has a strategy earned real money? Judged only on autopilot's own closed paper trades (real exits and fees),
+    oldest first. All five must hold: enough trades, over enough time, a meaningful average, profitable in each third
+    of its history (not one lucky streak), and total profit bigger than its worst losing stretch."""
+    n = len(trades)
+    rets, pnls = [h.get("ret", 0.0) for h in trades], [h["pnl"] for h in trades]
+    days = (datetime.fromisoformat(trades[-1]["time"]) - datetime.fromisoformat(trades[0]["time"])).days if n else 0
+    thirds = [rets[i * n // 3:(i + 1) * n // 3] for i in range(3)]
+    peak = run = drawdown = 0.0
+    for x in pnls:
+        run += x
+        peak = max(peak, run)
+        drawdown = max(drawdown, peak - run)
+    avg = sum(rets) / n if n else 0.0
+    checks = {f"{GRAD_TRADES}+ trades": n >= GRAD_TRADES, f"{GRAD_DAYS}+ days": days >= GRAD_DAYS,
+              "avg +0.5%+": avg >= GRAD_AVG, "profitable every third": n >= 3 and all(sum(t) > 0 for t in thirds),
+              "profit > worst drop": sum(pnls) > drawdown}
+    return {"n": n, "days": days, "avg": avg, "net": sum(pnls), "drawdown": drawdown, "checks": checks, "ok": all(checks.values())}
+
+
+def who(h):
+    """Which trader / member an autopilot trade copied."""
+    if h.get("rep"):
+        return h["rep"]
+    if h.get("source"):
+        return crypto_copier.short_addr(h["source"])
+    return ((h.get("feats") or {}).get("trader") or "").replace("trader ", "") or None
+
+
+def graduation():
+    """Grade every strategy: each market's whole autopilot, and copying each trader/member (once they have 10+ trades).
+    Tells you when one graduates (ready to consider real money) or loses it."""
+    rows = []
+    for m in MARKETS:
+        trades = closed_trades(m)[0]
+        rows.append({"name": f"{m.title()} autopilot", "market": m, **grade(trades)})
+        by = {}
+        for h in trades:
+            if who(h):
+                by.setdefault(who(h), []).append(h)
+        rows += [{"name": f"{m.title()}: copy {k}", "market": m, **grade(v)} for k, v in by.items() if len(v) >= 10]
+    now = {r["name"] for r in rows if r["ok"]}
+    for name in sorted(now - set(S["graduates"])):
+        log(f"GRADUATED: '{name}' passed every test on its paper trades. It's a candidate for real money; "
+            "moving it is your decision (the copier is paper-only until reviewed).")
+    for name in sorted(set(S["graduates"]) - now):
+        log(f"'{name}' lost its graduation: its recent paper trades no longer pass every test.")
+    S["graduates"] = sorted(now)
+    S["grad"] = sorted(rows, key=lambda r: (-r["ok"], -sum(r["checks"].values()), -r["n"]))[:12]
 
 
 def stake(m):
@@ -242,6 +296,7 @@ def run_check():
                 guard(m)  # judge the trades that just closed before opening new ones
                 run_autopilot(m)
             security_check()
+            graduation()
             added = len(S["pending"]) - before
             log(f"Checked: {added} new trade(s) to review" if added > 0 else "Checked: nothing new")
             S["error"] = None
@@ -407,6 +462,7 @@ if __name__ == "__main__":
         if ap(m)["on"] and not ap(m)["forced"] and not unlocked(m):
             ap(m)["on"] = False  # never resume autopilot on an unproven model unless the user started it as an experiment
         S["auto"][m] = auto_stats(m)
+    graduation()
     publish()
     threading.Thread(target=loop, daemon=True).start()
     threading.Thread(target=scout.run, args=(scout_log,), daemon=True).start()  # nonstop search for consistent traders

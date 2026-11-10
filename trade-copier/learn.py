@@ -10,8 +10,9 @@ Two honest tests:
 Run: python learn.py   (the app also runs it daily; takes ~10 min)
 """
 import json, os, statistics, sys, time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from copier import (http, load_env, fetch_trades, stock_features, predict, predict_for_trader, daily_closes, stock_history,
+                    global_features, GLOBAL_SYMBOLS,
                     MODEL_FILE, CONGRESS_CACHE, STOCK_EVENTS)
 from crypto_copier import (top_traders, crypto_features, is_new_position, candles_5m, minute_features, load_ledger,
                            watchlist, high_winners, fear_greed, sentiment_feature, regime_feature, EVENTS_FILE, FEE)
@@ -127,7 +128,8 @@ def congress_samples(since_year=2022):
         os.replace(tmp, CONGRESS_CACHE)
     trades = [t for t in trades if t["AssetType"] == "ST" and t["Ticker"] and t["Transaction"] != "Exchange"]
     print(f"  {len(trades)} stock trades by {len({t['Representative'] for t in trades})} members; fetching prices...", flush=True)
-    bars = daily_closes({t["Ticker"] for t in trades} | {"SPY"}, f"{since_year - 1}-11-01", (date.today() - timedelta(days=1)).isoformat())
+    bars = daily_closes({t["Ticker"] for t in trades} | {"SPY"} | GLOBAL_SYMBOLS, f"{since_year - 1}-11-01",
+                        (date.today() - timedelta(days=1)).isoformat())
     spy = bars["SPY"]
     spy_day = {d: i for i, (d, _) in enumerate(spy)}
     out = []
@@ -217,6 +219,10 @@ def crypto_samples(n_traders=60, per_trader=300):
         fng = fear_greed()
     except Exception:
         fng = {}  # mood unavailable: learn without it this time
+    try:  # the world's markets (dollar, rates, oil, gold, world stocks, fear gauge) over the same period, daily
+        world = daily_closes(GLOBAL_SYMBOLS, datetime.fromtimestamp(since / 1000).date().isoformat(), date.today().isoformat())
+    except Exception:
+        world = {}
     print(f"\n  + {len(logged)} positions the app logged; fetching hourly prices...", flush=True)
     closes = hourly_closes(coins, since - 2 * 24 * H, now)
     print(f"  fetching 5-minute candles (last ~17 days) for the minutes-before patterns...", flush=True)
@@ -236,6 +242,7 @@ def crypto_samples(n_traders=60, per_trader=300):
             feats.update(minute_features(five.get(coin, []), entered, side))  # {} when older than the 5m candles reach
             feats.update(regime_feature(closes.get("BTC", {}), entered, side))
             feats.update(sentiment_feature(fng, entered))
+            feats.update(global_features(world, datetime.fromtimestamp(entered / 1000, timezone.utc).date().isoformat(), side))
             out.append((feats, res[1]))
     # its own closed paper trades, with their REAL results: what it actually won and lost
     own = [(h["feats"], h["ret"]) for h in load_ledger()["history"] if h.get("feats") and "ret" in h]

@@ -7,7 +7,7 @@ import json, os, statistics, time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from copier import load_env, http, load_model, predict_for_trader, verdict
+from copier import load_env, http, load_model, predict_for_trader, verdict, daily_closes, global_features, GLOBAL_SYMBOLS
 
 HERE = Path(__file__).parent
 STATE_FILE = HERE / "crypto_state.json"
@@ -271,7 +271,8 @@ def close_pos(ledger, coin, px):
     ledger["cash"] += p["margin"] + pnl - fee
     ledger["history"].append({"time": datetime.now().isoformat(timespec="seconds"), "coin": coin,
                               "action": f"close {p['side']}", "price": px, "pnl": pnl - fee, "fee": fee,
-                              "ret": (pnl - fee) / p["margin"], "feats": p.get("feats"), "auto": p.get("auto", False)})
+                              "ret": (pnl - fee) / p["margin"], "feats": p.get("feats"), "auto": p.get("auto", False),
+                              "source": p.get("source")})
     return pnl - fee
 
 
@@ -393,6 +394,10 @@ def check_crypto(pending, log):
         btc, fng = btc_hourly(now0 - 8 * 24 * HOUR, now0), fear_greed()
     except Exception:
         btc, fng = {}, {}
+    try:  # the world's markets, daily (Alpaca): dollar, rates, oil, gold, world stocks, fear gauge
+        world = daily_closes(GLOBAL_SYMBOLS, (datetime.now() - timedelta(days=45)).date().isoformat(), datetime.now().date().isoformat())
+    except Exception:
+        world = {}
     with EVENTS_FILE.open("a") as f:
         for event, addr, coin in events:
             verb, side = event.split()
@@ -418,6 +423,7 @@ def check_crypto(pending, log):
                 feats.update(minute_features(c5[coin], when or now_ms, side))  # conditions up to the trader's actual entry
                 feats.update(regime_feature(btc, when or now_ms, side))
                 feats.update(sentiment_feature(fng, when or now_ms))
+                feats.update(global_features(world, datetime.fromtimestamp((when or now_ms) / 1000, timezone.utc).date().isoformat(), side))
                 score, why = predict_for_trader(model, feats)
                 agree = holders.count(side) - 1
                 why.append(f"{agree} other top trader(s) agree, {len(holders) - holders.count(side)} opposite")

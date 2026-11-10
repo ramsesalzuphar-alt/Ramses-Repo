@@ -149,6 +149,8 @@
 
   <div data-tab="accounts" hidden>
     <section class="card"><h2>All open positions <span class="sub" id="totals-at"></span></h2><div id="totals"></div></section>
+    <section class="card"><h2>Graduation <span class="sub">which strategies have earned real money, judged only on autopilot's own paper trades</span></h2>
+      <div id="grad"></div></section>
     <section class="two">
       <div class="card"><h2>Crypto autopilot</h2><div id="ap-crypto"></div></div>
       <div class="card"><h2>Stock autopilot</h2><div id="ap-stocks"></div></div>
@@ -335,6 +337,23 @@ function scoutCard(sc) {
     + `</table></div><div class="ago" style="margin-top:6px">Copies are graded entering 30 min after them and holding 24h, after fees. Close rule = picked on the older half of their copies, kept only if it also made money on the newer half it never saw (all rules also close when the trader closes); autopilot uses it for their copies. Finds must also clear a 50% win rate with 99% confidence, so lucky small samples don't count. The copier watches all of these.</div>`;
 }
 
+function gradCard(s) {
+  const rows = s.grad || [];
+  const ready = (s.graduates || []).length
+    ? `<div class="banner" style="background:var(--green-bg);color:var(--green)"><b>Ready to consider real money:</b> ${s.graduates.map(esc).join(", ")}.
+        Passing on paper isn't a guarantee: real fills, slippage and taxes differ. Moving to a live account is your call,
+        and the copier is paper-only until we review it together.</div>` : "";
+  if (!rows.length) return ready + `<div class="empty">No autopilot trades closed yet. Strategies are graded as autopilot trades them.</div>`;
+  const tests = Object.keys(rows[0].checks);
+  return ready + `<div class="scroll"><table><tr><th>Strategy</th><th class="r">Trades</th><th class="r">Days</th><th class="r">Avg</th><th class="r">Net</th>
+      ${tests.map(t => `<th class="r">${esc(t)}</th>`).join("")}<th></th></tr>`
+    + rows.map(r => `<tr><td>${esc(r.name)}</td><td class="r">${r.n}</td><td class="r">${r.days}</td>
+        <td class="r ${r.avg > 0 ? "up" : "down"}">${(r.avg * 100).toFixed(2)}%</td><td class="r">${signed(r.net)}</td>
+        ${tests.map(t => `<td class="r">${r.checks[t] ? '<span class="up">✓</span>' : '<span class="ago">–</span>'}</td>`).join("")}
+        <td>${r.ok ? '<span class="pill STRONG">GRADUATED</span>' : ""}</td></tr>`).join("")
+    + `</table></div><div class="ago" style="margin-top:6px">To graduate, all five: ${tests.join(" · ")}. A strategy that later fails one loses its status, and you're told.</div>`;
+}
+
 function account(a, crypto) {
   if (!a) return `<div class="empty">Loading…</div>`;
   if (a.error) return `<div class="banner">${esc(a.error)}</div>`;
@@ -379,7 +398,8 @@ function render(s) {
     set("ap-" + mk, autopilotCard(s, mk));
   }
   const on = ["crypto", "stocks"].filter(mk => s.ap[mk].on);
-  $("ap-dot").innerHTML = on.length ? `<span class="pill on" style="font-size:11px">${on.length} ON</span>` : "";
+  $("ap-dot").innerHTML = ((s.graduates || []).length ? `<span class="pill STRONG" style="font-size:11px">${s.graduates.length} GRADUATED</span> ` : "")
+    + (on.length ? `<span class="pill on" style="font-size:11px">${on.length} ON</span>` : "");
   document.querySelectorAll(".ago[data-ts]").forEach(e => e.textContent = "· " + ago(+e.dataset.ts));  // in place: no redraw
   set("scout", scoutCard(s.scout));
   const accts = [s.crypto, s.stocks].filter(a => a && !a.error && a.invested != null);
@@ -390,6 +410,7 @@ function render(s) {
       <div><h3>Worth now</h3><div class="big">${money(val)}</div><p class="sub">${signed(val - inv)} (${inv ? ((val / inv - 1) * 100).toFixed(2) : "0.00"}%)</p></div>
       ${accts.length < 2 ? `<div><p class="sub">One account couldn't be priced right now, so this covers only the other.</p></div>` : ""}
     </div>` : `<div class="empty">Loading…</div>`);
+  set("grad", gradCard(s));
   set("crypto", account(s.crypto, true));
   set("stocks", account(s.stocks, false));
   set("traders", s.traders.length ? s.traders.map((t, i) => `<div><span>${i + 1}. ${esc(t.name)}</span>
