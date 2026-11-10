@@ -1,0 +1,27 @@
+# secrets: API keys live only on this computer
+.env
+.mcp.json
+.claude/settings.local.json
+
+# your paper accounts, trades, state and logs (private, and change every minute)
+app_state.json
+app_errors.log
+paper_ledger.json
+crypto_state.json
+crypto_events.jsonl
+seen.json
+seen_docs.json
+stock_sources.json
+stock_history.json
+stock_events.jsonl
+
+# learned or downloaded data (rebuilt by learn.py and the scout)
+model.json
+model.json.bak
+model.tmp
+scout.json
+scout.tmp
+congress_cache.json
+congress_cache.tmp
+
+__pycache__/

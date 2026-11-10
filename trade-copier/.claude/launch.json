@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "trade-copier",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-u", "app.py"],
+      "port": 8765,
+      "url": "http://127.0.0.1:8765"
+    }
+  ]
+}

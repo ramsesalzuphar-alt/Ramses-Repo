@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trade Copier</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e5e7eb;
+    --green: #15803d; --green-bg: #dcfce7; --red: #b91c1c; --red-bg: #fee2e2;
+    --amber: #a16207; --amber-bg: #fef3c7; --accent: #2563eb; --accent-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #181b21; --text: #e8eaee; --muted: #9aa3b2; --line: #2a2f38;
+      --green: #4ade80; --green-bg: #12321f; --red: #f87171; --red-bg: #3a1717;
+      --amber: #fbbf24; --amber-bg: #3a2c0b; --accent: #3b82f6; --accent-text: #ffffff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  h1 { font-size: 22px; margin: 0; }
+  .sub { color: var(--muted); font-size: 13px; }
+  h2 { font-size: 16px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .count { background: var(--accent); color: var(--accent-text); border-radius: 999px; font-size: 12px; padding: 1px 8px; }
+  .status { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+  button { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text);
+           padding: 8px 14px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.small { padding: 3px 10px; font-size: 13px; }
+  button.danger { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
+  .banner { background: var(--red-bg); color: var(--red); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  section { margin-bottom: 22px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+  .chips { display: flex; gap: 6px; margin-bottom: 8px; }
+  .chip { font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; border-radius: 6px; padding: 2px 7px;
+          background: var(--bg); color: var(--muted); }
+  .up { color: var(--green); } .down { color: var(--red); }
+  .chip.up { background: var(--green-bg); } .chip.down { background: var(--red-bg); }
+  .chip.urg3 { background: var(--red-bg); color: var(--red); } .chip.urg2 { background: var(--amber-bg); color: var(--amber); }
+  .title { font-weight: 650; font-size: 16px; }
+  .vol { font-size: 13px; margin-top: 4px; } .vol b { font-variant-numeric: tabular-nums; }
+  .detail { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .timing { margin-top: 10px; padding: 8px 10px; background: var(--bg); border-radius: 8px; font-size: 13px; }
+  .trow { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+  .trow > span:first-child { color: var(--muted); white-space: nowrap; }
+  .trow > span:last-child { text-align: right; }
+  .ago { color: var(--muted); }
+  .late { color: var(--amber); }
+  .mgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .mgrid h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .03em; }
+  .mgrid p { margin: 2px 0; font-size: 13px; }
+  .prog { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 4px 0; }
+  .prog .bar { height: 5px; }
+  .autobar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+             margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .on { background: var(--green-bg); color: var(--green); } .off { background: var(--bg); color: var(--muted); }
+  .score { display: flex; align-items: center; gap: 10px; margin: 12px 0 6px; }
+  .num { font-size: 26px; font-weight: 700; min-width: 44px; }
+  .bar { flex: 1; height: 6px; background: var(--line); border-radius: 999px; overflow: hidden; }
+  .bar span { display: block; height: 100%; border-radius: 999px; }
+  .pill { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 2px 10px; }
+  .STRONG { background: var(--green-bg); color: var(--green); } .STRONG-bar { background: var(--green); }
+  .MIXED { background: var(--amber-bg); color: var(--amber); }  .MIXED-bar { background: var(--amber); }
+  .WEAK { background: var(--red-bg); color: var(--red); }       .WEAK-bar { background: var(--red); }
+  ul.why { margin: 6px 0 14px; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  .actions { display: flex; gap: 8px; }
+  .actions .primary { flex: 1; }
+  .empty { color: var(--muted); text-align: center; padding: 26px 16px; }
+  .big { font-size: 28px; font-weight: 700; }
+  .meta { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { max-height: 340px; overflow: auto; }
+  .log div { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .log time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
+  .traders div { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 10px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 10px 16px;
+                 font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  [data-tab][hidden] { display: none; }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--bg);
+           padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Trade Copier</h1>
+      <div class="sub">Paper trading · you approve entries, or let each market's autopilot · copies close when the trader exits, or by their take profit / stop loss rule</div>
+    </div>
+    <div class="status"><span id="status">Loading…</span><button id="check">Check now</button></div>
+  </header>
+  <div id="error"></div>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tabbtn="crypto" aria-selected="true">Crypto <span class="count" id="count-crypto">0</span></button>
+    <button role="tab" data-tabbtn="stocks" aria-selected="false">Stocks <span class="count" id="count-stocks">0</span></button>
+    <button role="tab" data-tabbtn="accounts" aria-selected="false">Accounts &amp; autopilot <span id="ap-dot"></span></button>
+  </nav>
+
+  <div data-tab="crypto">
+    <section>
+      <h2>Waiting for you <span class="sub">crypto trades disappear after 10 minutes</span></h2>
+      <div id="pending-crypto" class="grid"></div>
+    </section>
+    <section class="card">
+      <h2>Learning <span class="sub">crypto · autopilot is on the Accounts tab</span></h2>
+      <div id="model-crypto"></div>
+    </section>
+    <section>
+      <h2>Trader methods <span class="sub">each trader's own model: their habits, and when copying them worked</span></h2>
+      <div id="methods-crypto" class="grid"></div>
+    </section>
+    <section class="card">
+      <h2>Edge scout <span class="sub">scans every active, profitable trader nonstop for copies that win consistently, not just big</span></h2>
+      <div id="scout"></div>
+    </section>
+    <section class="card"><h2>Top crypto traders this month</h2><div id="traders" class="traders"></div></section>
+  </div>
+
+  <div data-tab="stocks" hidden>
+    <section>
+      <h2>Waiting for you <span class="sub">every House member's trades, biggest first</span></h2>
+      <div id="pending-stocks" class="grid"></div>
+    </section>
+    <section class="card">
+      <h2>Learning <span class="sub">stocks · learned from every House member's trades · autopilot is on the Accounts tab</span></h2>
+      <div id="model-stocks"></div>
+    </section>
+    <section>
+      <h2>Member methods <span class="sub">each member's own model: their habits, and when copying them worked</span></h2>
+      <div id="methods-stocks" class="grid"></div>
+    </section>
+  </div>
+
+  <div data-tab="accounts" hidden>
+    <section class="two">
+      <div class="card"><h2>Crypto autopilot</h2><div id="ap-crypto"></div></div>
+      <div class="card"><h2>Stock autopilot</h2><div id="ap-stocks"></div></div>
+    </section>
+    <section class="two">
+      <div class="card"><h2>Crypto paper account</h2><div id="crypto"></div></div>
+      <div class="card"><h2>Stock paper account <span class="sub">Alpaca</span></h2><div id="stocks"></div></div>
+    </section>
+  </div>
+
+  <section class="card"><h2>Activity</h2><div id="log" class="log scroll"></div></section>
+
+  <footer>Paper money only. Scores show how often similar past trades made money (python learn.py to retrain) and are not financial advice.</footer>
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const money = x => (x < 0 ? "-" : "") + "$" + Math.abs(x).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const signed = x => `<span class="${x >= 0 ? "up" : "down"}">${x >= 0 ? "+" : "-"}${money(Math.abs(x))}</span>`;
+const price = x => x >= 100 ? x.toLocaleString(undefined, {maximumFractionDigits: 2}) : x.toPrecision(4);
+let busy = false;
+let tab = "crypto";
+try { tab = ["stocks", "accounts"].includes(localStorage.getItem("tab")) ? localStorage.getItem("tab") : "crypto"; } catch {}
+function showTab(t) {
+  tab = t;
+  try { localStorage.setItem("tab", t); } catch {}
+  document.querySelectorAll("[data-tab]").forEach(el => el.hidden = el.dataset.tab !== t);
+  document.querySelectorAll("[data-tabbtn]").forEach(el => el.setAttribute("aria-selected", el.dataset.tabbtn === t));
+}
+let armed = null, armTimer;  // coin whose Close was clicked once; browser confirm() pop-ups are blocked in the app's pane
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3500);
+}
+
+async function post(path, body) {
+  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json", "X-App": "1"}, body: JSON.stringify(body || {})});
+  const j = await r.json().catch(() => ({msg: "Request failed"}));
+  toast(j.msg); load();
+}
+
+const clock = ts => {
+  const d = new Date(ts), today = d.toDateString() === new Date().toDateString();
+  return (today ? "" : d.toLocaleDateString([], {month: "short", day: "numeric"}) + ", ") + d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+};
+const day = ts => new Date(ts).toLocaleDateString([], {month: "short", day: "numeric", year: "numeric"});
+function ago(ts) {
+  const m = Math.round((Date.now() - ts) / 60000);
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
+}
+
+function timing(p) {
+  const rows = [];
+  if (p.kind === "pelosi") {
+    if (p.entered_at) rows.push(["They traded", day(p.entered_at), p.entered_at]);
+    if (p.filed_at) rows.push(["Filed publicly", day(p.filed_at), p.filed_at]);
+  } else if (p.entered_at) {
+    rows.push(["Trader entered", clock(p.entered_at) + (p.entry_px ? ` at $${price(p.entry_px)}` : ""), p.entered_at]);
+  } else if (p.seen_at) {
+    rows.push(["Spotted", clock(p.seen_at), p.seen_at]);
+  }
+  let html = rows.map(([k, v, ts]) => `<div class="trow"><span>${k}</span><span><b>${esc(v)}</b> <span class="ago" data-ts="${ts}"></span></span></div>`).join("");
+  if (p.entry_px && p.price_now) {
+    const mv = p.price_now / p.entry_px - 1;
+    const worse = p.side === "long" ? mv > 0 : mv < 0;  // the move already happened in their favor
+    html += `<div class="trow"><span>Price since</span><span>$${price(p.price_now)} (${mv >= 0 ? "+" : ""}${(mv * 100).toFixed(2)}%) ·
+      <span class="${worse ? "late" : "up"}">you'd get a ${worse ? "worse" : "better"} price</span></span></div>`;
+  }
+  return html ? `<div class="timing">${html}</div>` : "";
+}
+
+const bigMoney = x => x >= 1e6 ? `$${(x / 1e6).toFixed(x >= 1e7 ? 0 : 1)}M` : x >= 1e3 ? `$${Math.round(x / 1e3)}k` : `$${Math.round(x)}`;
+function volume(p) {  // how much money is behind the trade: the trader's position, or the member's disclosed range
+  if (p.kind === "crypto") return p.volume ? `<div class="vol">Volume <b>${bigMoney(p.volume)}</b> <span class="ago">their position</span></div>` : "";
+  const r = (p.trade && p.trade.Range || "").replace(/\s*-\s*$/, "+");
+  return r ? `<div class="vol">Volume <b>${esc(r)}</b> <span class="ago">disclosed range</span></div>` : "";
+}
+
+function card(p) {
+  const up = p.side === "buy" || p.side === "long";
+  return `<div class="card">
+    <div class="chips"><span class="chip">${p.kind === "pelosi" ? "Congress" : "Crypto"}</span>
+      ${p.urgency_label ? `<span class="chip urg${p.urgency}">${esc(p.urgency_label)}</span>` : ""}
+      <span class="chip ${up ? "up" : "down"}">${esc(p.side)}</span></div>
+    <div class="title">${esc(p.title)}</div>
+    ${volume(p)}
+    <div class="detail">${esc(p.detail)}</div>
+    ${timing(p)}
+    <div class="score"><span class="num">${p.score}</span>
+      <div class="bar"><span class="${p.verdict}-bar" style="width:${p.score}%"></span></div>
+      <span class="pill ${p.verdict}">${p.verdict}</span></div>
+    <ul class="why">${p.why.map(w => `<li>${esc(w)}</li>`).join("")}</ul>
+    <div class="actions">
+      <button class="primary" data-act="yes" data-id="${esc(p.id)}">Copy · ${esc(p.label)}</button>
+      <button data-act="no" data-id="${esc(p.id)}">Skip</button>
+    </div></div>`;
+}
+
+function modelCard(s, mk) {
+  const m = s.model, crypto = mk === "crypto";
+  const retrainBtn = `<button class="small" data-retrain="1" ${s.training ? "disabled" : ""}>${s.training ? "Relearning…" : "Relearn now"}</button>`;
+  const x = m && m[mk];
+  if (!x || !x.backtest) return `<div class="empty">No ${crypto ? "crypto" : "stock"} model yet. ${retrainBtn}</div>`;
+  const r = m.rule, lv = x.live || {graded: 0, n_high: 0, n_low: 0, high: "none yet", low: "none yet", edge: false};
+  const edgeTxt = e => e ? '<span class="up">some edge</span>' : '<span class="late">no proven edge</span>';
+  const who = crypto ? "trader" : "member";
+  const back = `<p><b>Pooled</b> · ${x.n ?? "?"} past trades · ${edgeTxt(x.backtest.edge)}</p>
+    <p class="sub">scored 55+: ${esc(x.backtest.high)}<br>under 45: ${esc(x.backtest.low)}</p>`
+    + (x.personal ? `<p style="margin-top:6px"><b>Per-${who}</b> · ${x.profiles.length} personal models · ${edgeTxt(x.personal.edge)}</p>` : "");
+  const prog = (label, n) => `<div class="prog"><span style="min-width:96px">${label}</span>
+      <div class="bar"><span class="${n >= r.min_each ? "STRONG" : "MIXED"}-bar" style="width:${Math.min(100, n / r.min_each * 100)}%"></span></div>
+      <span>${Math.min(n, r.min_each)}/${r.min_each}</span></div>`;
+  const pats = x.patterns.length ? `<div style="margin-top:14px"><h3 class="sub" style="margin:0 0 6px">PATTERNS IT LEARNED (avg ${Math.round(x.base_win * 100)}% won)</h3>
+      ${x.patterns.map(p => `<div class="trow"><span>${esc(p.pattern)}</span><span><b class="${p.win >= x.base_win ? "up" : "down"}">${Math.round(p.win * 100)}% won</b>
+        <span class="ago">· avg ${(p.avg * 100).toFixed(2)}% · n=${p.n}</span></span></div>`).join("")}</div>` : "";
+  return `<div class="mgrid">
+      <div><h3>Model</h3><p>Learned ${esc(new Date(m.trained).toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"}))}
+        · relearns daily</p><p style="margin-top:8px">${retrainBtn}</p></div>
+      <div><h3>Backtest</h3>${back}</div>
+      <div><h3>Live track record</h3>
+        <p class="sub">Every scored trade is graded ${crypto ? "24h" : "a month"} later, copied or not. ${lv.graded} graded so far.</p>
+        ${prog(`STRONG (${r.strong}+)`, lv.n_high)}${prog(`WEAK (&lt;${r.weak})`, lv.n_low)}
+        <p>STRONG: ${esc(lv.high)}</p><p>WEAK: ${esc(lv.low)}</p></div>
+    </div>${pats}`;
+}
+
+function autopilotCard(s, mk) {
+  const m = s.model, x = m && m[mk], crypto = mk === "crypto";
+  const lv = (x && x.live) || {edge: false};
+  const ap = s.ap[mk], a = (s.auto || {})[mk] || {}, unlocked = lv.edge;
+  const stats = (a.open || a.closed) ? `<div class="sub" style="margin-top:6px">Its own trades: ${a.open} open · ${a.closed} closed${a.closed
+      ? ` · ${signed(a.pnl)} realized · ${Math.round(a.won * 100)}% won` : ""} · loss guard: last ${a.recent_n}/10 trades ${signed(a.recent_pnl)}</div>` : "";
+  const what = crypto
+    ? "copies STRONG crypto trades (≥ +1% expected after fees) by itself · max 5 per check · closes by each trader's learned rule, else take profit +6% / stop loss −2% · paper"
+    : "buys STRONG congressional purchases (≥ +1% expected vs the market) by itself · max 5 per check · $1,000 each · sells on take profit +9%, stop loss −3%, after 30 days, or when the member sells · paper";
+  const auto = (ap.on
+    ? `<span class="pill on">AUTOPILOT ON${ap.forced ? " · EXPERIMENT" : ""}</span> <span class="sub">${what}</span>`
+    : ap.resume ? `<span class="pill MIXED">PAUSED BY LOSS GUARD</span> <span class="sub">relearning from its losing trades, then resumes</span>`
+    : unlocked ? `<span class="pill off">AUTOPILOT OFF</span> <span class="sub">unlocked: STRONG trades averaged +0.5% or more and beat WEAK ones live</span>`
+               : `<span class="pill off">AUTOPILOT LOCKED</span> <span class="sub">unlocks when STRONG trades average +0.5% or more and beat WEAK ones live. You can run it now as a paper experiment.</span>`) + stats;
+  const btn = (on, force, label, primary) => `<button ${primary ? 'class="primary"' : ""} data-auto="${on}" data-market="${mk}" ${force ? 'data-force="1"' : ""}
+      ${!on && ap.resume ? "disabled" : ""}>${label}</button>`;
+  const autoBtn = ap.on ? btn("off", false, "Turn autopilot off") : unlocked ? btn("on", false, "Turn autopilot on", true)
+                        : btn("on", true, "Run experiment (paper)", true);
+  return `<div>${auto}</div><div style="margin-top:12px">${autoBtn}</div>`;
+}
+
+function methods(s, mk) {
+  const ps = (s.model && s.model[mk] && s.model[mk].profiles) || [];
+  if (!ps.length) return `<div class="card empty">No ${mk === "crypto" ? "trader" : "member"} has enough history for a personal model yet (needs 40 trades). Relearn to build them.</div>`;
+  const cond = (list, cls) => list.map(c => `<div class="trow"><span>${esc(c.when)}</span><span class="${cls}">${Math.round(c.win * 100)}% won <span class="ago">n=${c.n}</span></span></div>`).join("");
+  return ps.map(p => `<div class="card">
+    <div class="title">${esc(p.trader.replace(/^(trader|member) /, ""))}</div>
+    <div class="detail">${p.n} past trades · copying won ${Math.round(p.win * 100)}% · avg ${(p.avg * 100).toFixed(2)}% per trade</div>
+    <div class="timing"><div class="sub" style="margin-bottom:4px">THEIR HABITS</div>
+      ${p.style.length ? p.style.map(x => `<div style="padding:2px 0">${esc(x)}</div>`).join("") : `<div class="ago">no strong habits: trades in all conditions</div>`}</div>
+    <div class="timing"><div class="sub" style="margin-bottom:4px">COPYING THEM WORKED BEST WHEN</div>${cond(p.best, "up")}
+      ${p.worst.length ? `<div class="sub" style="margin:6px 0 4px">AND WORST WHEN</div>${cond(p.worst, "down")}` : ""}</div>
+  </div>`).join("");
+}
+
+function scoutCard(sc) {
+  if (!sc) return `<div class="empty">Starting its first scan…</div>`;
+  const pct = x => Math.round(x * 100) + "%";
+  const head = `<div class="meta">Scanned ${sc.scanned.toLocaleString()} of ${sc.of.toLocaleString()} traders · then rescans, oldest first ·
+    a find = copies won 55%+ in every third of their history, or a pattern of theirs won 60%+ in both halves</div>`
+    + (sc.error ? `<div class="banner">${esc(sc.error)}</div>` : "");
+  if (!sc.finds.length) return head + `<div class="empty">No consistent edges found yet.</div>`;
+  return head + `<div class="scroll"><table><tr><th>Trader</th><th class="r">Copies</th><th class="r">Won</th><th class="r">Worst period</th><th class="r">Avg</th><th>Consistent when</th><th>Close rule</th></tr>`
+    + sc.finds.map(f => `<tr><td title="${esc(f.addr)}">${esc(f.name)}</td><td class="r">${f.n}</td><td class="r">${pct(f.win)}</td>
+        <td class="r up">${f.consistent ? pct(f.worst) : "—"}</td><td class="r ${f.avg > 0 ? "up" : "down"}">${(f.avg * 100).toFixed(2)}%</td>
+        <td>${[f.consistent ? "every trade" : "", ...f.patterns.map(p => `${esc(p.when)} (${pct(p.win)}, n=${p.n})`)].filter(Boolean).join(", ")}</td>
+        <td>${f.exit ? `${esc(f.exit.name)} <span class="ago">(${(f.exit.avg * 100).toFixed(2)}% avg on ${f.exit.n} unseen copies)</span>` : `<span class="ago">default</span>`}</td></tr>`).join("")
+    + `</table></div><div class="ago" style="margin-top:6px">Copies are graded entering 30 min after them and holding 24h, after fees. Close rule = picked on the older half of their copies, kept only if it also made money on the newer half it never saw (all rules also close when the trader closes); autopilot uses it for their copies. Finds must also clear a 50% win rate with 99% confidence, so lucky small samples don't count. The copier watches all of these.</div>`;
+}
+
+function account(a, crypto) {
+  if (!a) return `<div class="empty">Loading…</div>`;
+  if (a.error) return `<div class="banner">${esc(a.error)}</div>`;
+  const head = (a.stale ? `<div class="banner">${esc(a.stale)}</div>` : "") + `<div class="big">${money(a.equity)}</div>
+    <div class="meta">${signed(a.change)} ${crypto ? "since start" : "today"} · cash ${money(a.cash)}</div>`;
+  if (!a.positions.length) return head + `<div class="empty">No open positions</div>`;
+  const rows = a.positions.map(p => crypto
+    ? `<tr><td class="${p.side === "long" ? "up" : "down"}">${esc(p.side)}</td><td title="${esc(p.rule)}">${esc(p.coin)}${p.auto ? ` <span class="ago">auto</span>` : ""}<div class="ago">${esc(p.source)} · ${esc(p.rule)}</div></td>
+         <td class="r">${price(p.entry)}</td><td class="r">${price(p.now)}</td><td class="r">${signed(p.pnl)}</td>
+         <td class="r"><button class="small${armed === p.coin ? " danger" : ""}" data-close="${esc(p.coin)}" aria-label="Close ${esc(p.coin)}" title="Copied from ${esc(p.source)}">${armed === p.coin ? "Confirm close" : "Close"}</button></td></tr>`
+    : `<tr><td>${esc(p.symbol)}${p.auto ? ` <span class="ago">auto</span>` : ""}${p.source ? `<div class="ago">${esc(p.source)}</div>` : ""}</td><td class="r">${p.qty.toPrecision(4)}</td><td class="r">${price(p.entry)}</td>
+         <td class="r">${price(p.now)}</td><td class="r">${signed(p.pnl)}</td></tr>`).join("");
+  const cols = crypto ? `<th>Side</th><th>Coin</th><th class="r">Entry</th><th class="r">Now</th><th class="r">P&amp;L</th><th></th>`
+                      : `<th>Stock</th><th class="r">Qty</th><th class="r">Entry</th><th class="r">Now</th><th class="r">P&amp;L</th>`;
+  return head + `<div class="scroll"><table><tr>${cols}</tr>${rows}</table></div>`;
+}
+
+function set(id, html) {  // only redraw when something changed, so clicks aren't lost to a redraw mid-click
+  const el = $(id);
+  if (el._html !== html) { el.innerHTML = html; el._html = html; }
+}
+
+function render(s) {
+  busy = s.checking;
+  $("status").textContent = s.checking ? "Checking…" : `Last check ${s.last_check || "—"}` + (s.next_check ? ` · next ${s.next_check}` : "");
+  $("check").disabled = s.checking;
+  set("error", s.error ? `<div class="banner">${esc(s.error)}</div>` : "");
+  document.title = s.pending.length ? `(${s.pending.length}) Trade Copier` : "Trade Copier";
+  for (const mk of ["crypto", "stocks"]) {
+    const mine = s.pending.filter(p => (p.kind === "crypto") === (mk === "crypto"))
+                          .sort((a, b) => (b.urgency || 0) - (a.urgency || 0));  // biggest congressional trades first
+    $("count-" + mk).textContent = mine.length;
+    set("pending-" + mk, mine.length ? mine.map(card).join("") : `<div class="card empty">Nothing waiting. New trades show up here.</div>`);
+    $("pending-" + mk).querySelectorAll("[data-act]").forEach(b => b.disabled = s.checking);
+    set("model-" + mk, modelCard(s, mk));
+    set("methods-" + mk, methods(s, mk));
+    set("ap-" + mk, autopilotCard(s, mk));
+  }
+  const on = ["crypto", "stocks"].filter(mk => s.ap[mk].on);
+  $("ap-dot").innerHTML = on.length ? `<span class="pill on" style="font-size:11px">${on.length} ON</span>` : "";
+  document.querySelectorAll(".ago[data-ts]").forEach(e => e.textContent = "· " + ago(+e.dataset.ts));  // in place: no redraw
+  set("scout", scoutCard(s.scout));
+  set("crypto", account(s.crypto, true));
+  set("stocks", account(s.stocks, false));
+  set("traders", s.traders.length ? s.traders.map((t, i) => `<div><span>${i + 1}. ${esc(t.name)}</span>
+      <span><span class="up">+$${(t.pnl / 1e6).toFixed(1)}M</span> · <span class="up">${t.longs}L</span> <span class="down">${t.shorts}S</span></span></div>`).join("")
+    : `<div class="empty">Waiting for first check</div>`);
+  set("log", s.log.length ? s.log.map(l => `<div><time>${esc(l.time)}</time>${esc(l.msg)}</div>`).join("")
+    : `<div class="empty">No activity yet</div>`);
+}
+
+async function load() {
+  try { render(await (await fetch("/api/state")).json()); }
+  catch {
+    $("status").textContent = "Can't reach the copier.";
+    set("error", `<div class="banner">${location.protocol !== "http:"
+      ? 'This is the file opened directly, so it has no data. Open <a href="http://127.0.0.1:8765">http://127.0.0.1:8765</a> instead.'
+      : "The copier isn't running. Log out and back in to Windows, or double-click Trade Copier in your Startup folder (Win+R, shell:startup)."}</div>`);
+  }
+}
+
+document.addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b || b.disabled) return;
+  if (b.dataset.act) { b.disabled = true; post("/api/decide", {id: b.dataset.id, approve: b.dataset.act === "yes"}); }
+  else if (b.dataset.close) {
+    clearTimeout(armTimer);
+    if (armed === b.dataset.close) { armed = null; b.disabled = true; post("/api/close", {coin: b.dataset.close}); }
+    else { armed = b.dataset.close; armTimer = setTimeout(() => { armed = null; load(); }, 4000); load(); }
+  }
+  else if (b.id === "check") { b.disabled = true; post("/api/check"); }
+  else if (b.dataset.auto) { b.disabled = true; post("/api/autopilot", {on: b.dataset.auto === "on", force: b.dataset.force === "1", market: b.dataset.market}); }
+  else if (b.dataset.tabbtn) showTab(b.dataset.tabbtn);
+  else if (b.dataset.retrain) { b.disabled = true; post("/api/retrain"); }
+});
+showTab(tab); load(); setInterval(load, 5000);
+</script>
+</body>
+</html>
