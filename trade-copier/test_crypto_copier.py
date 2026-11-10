@@ -122,3 +122,14 @@ real.hl = (lambda body: {"assetPositions": [{"position": {"coin": "BTC", "szi": 
                                                               {"position": {"coin": "ETH", "szi": "10", "positionValue": "20000"}}]})
 assert real.positions("x") == {"BTC": "short", "ETH": "long"}
 print("position size tests pass")
+
+# account totals: entered = what's in open copies, worth now = that plus their live P&L
+import importlib, tempfile as _tf2, pathlib as _pl2
+ac = importlib.reload(cc)
+ac.LEDGER_FILE = _pl2.Path(_tf2.mkdtemp()) / "ledger.json"
+L = fresh(); open_pos(L, "BTC", "long", 100, 50000); open_pos(L, "ETH", "short", 200, 2000)
+ac.save_ledger(L)
+ac.hl = lambda body: {"BTC": "55000", "ETH": "1900"}     # BTC +10% (+$10), ETH short -5% price (+$10)
+a = ac.crypto_account()
+assert a["invested"] == 300 and abs(a["value"] - 320) < 1e-9, (a["invested"], a["value"])
+print("account total tests pass")

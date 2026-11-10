@@ -404,10 +404,11 @@ def check_crypto(pending, log):
              "shorts": sum(s == "short" for s in new[a].values())} for pnl, a, _ in top]
 
 
-def decide_crypto(item, auto=False):
-    """Copy an approved proposal at the live price, if the trader still holds it. Returns a message."""
+def decide_crypto(item, auto=False, stake=1):
+    """Copy an approved proposal at the live price, if the trader still holds it. stake multiplies the trade size
+    (autopilot earns more than x1 by being consistently profitable). Returns a message."""
     load_env()
-    dollars = float(os.environ.get("CRYPTO_DOLLARS_PER_TRADE", "100"))
+    dollars = float(os.environ.get("CRYPTO_DOLLARS_PER_TRADE", "100")) * stake
     ledger, coin, side = load_ledger(), item["coin"], item["side"]
     if coin in ledger["positions"]:
         return f"You already hold {coin}, not copied"
@@ -444,7 +445,9 @@ def crypto_account():
         stale = f"Can't reach Hyperliquid ({e}). Prices and P&L are frozen at the last ones seen (or entry price); auto-exits wait until it's back."
         mids = {**{c: p["entry"] for c, p in ledger["positions"].items()}, **_last_mids}
     eq = equity(ledger, mids)
-    return {"stale": stale, "equity": eq, "change": eq - ledger["start"], "cash": ledger["cash"],
+    invested = sum(p["margin"] for p in ledger["positions"].values())  # what you put into the open copies (1x: their size)
+    value = invested + sum(pnl_of(p, float(mids.get(c, p["entry"]))) for c, p in ledger["positions"].items())
+    return {"stale": stale, "equity": eq, "change": eq - ledger["start"], "cash": ledger["cash"], "invested": invested, "value": value,
             "positions": [{"coin": c, "side": p["side"], "entry": p["entry"], "now": float(mids.get(c, p["entry"])),
                            "pnl": pnl_of(p, float(mids.get(c, p["entry"]))), "source": short_addr(p["source"]) if p.get("source") else "?",
                            "auto": bool(p.get("auto")), "rule": rule_text(p)}

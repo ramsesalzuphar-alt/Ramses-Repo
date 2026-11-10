@@ -114,7 +114,7 @@
 
   <div data-tab="crypto">
     <section>
-      <h2>Waiting for you <span class="sub">crypto trades disappear after 10 minutes</span></h2>
+      <h2>Waiting for you <span class="sub">newest first · crypto trades disappear after 10 minutes</span></h2>
       <div id="pending-crypto" class="grid"></div>
     </section>
     <section class="card">
@@ -134,7 +134,7 @@
 
   <div data-tab="stocks" hidden>
     <section>
-      <h2>Waiting for you <span class="sub">every House member's trades, biggest first</span></h2>
+      <h2>Waiting for you <span class="sub">every House member's trades, newest filings first</span></h2>
       <div id="pending-stocks" class="grid"></div>
     </section>
     <section class="card">
@@ -148,6 +148,7 @@
   </div>
 
   <div data-tab="accounts" hidden>
+    <section class="card"><h2>All open positions <span class="sub" id="totals-at"></span></h2><div id="totals"></div></section>
     <section class="two">
       <div class="card"><h2>Crypto autopilot</h2><div id="ap-crypto"></div></div>
       <div class="card"><h2>Stock autopilot</h2><div id="ap-stocks"></div></div>
@@ -229,6 +230,9 @@ function volume(p) {  // how much money is behind the trade: the trader's positi
   return r ? `<div class="vol">Volume <b>${esc(r)}</b> <span class="ago">disclosed range</span></div>` : "";
 }
 
+// how recent a trade is: congress = when it was filed publicly; crypto = when the trader entered (or when it was spotted)
+const when = p => p.filed_at || p.entered_at || p.seen_at || 0;
+
 function card(p) {
   const up = p.side === "buy" || p.side === "long";
   return `<div class="card">
@@ -283,6 +287,10 @@ function autopilotCard(s, mk) {
   const ap = s.ap[mk], a = (s.auto || {})[mk] || {}, unlocked = lv.edge;
   const stats = (a.open || a.closed) ? `<div class="sub" style="margin-top:6px">Its own trades: ${a.open} open · ${a.closed} closed${a.closed
       ? ` · ${signed(a.pnl)} realized · ${Math.round(a.won * 100)}% won` : ""} · loss guard: last ${a.recent_n}/10 trades ${signed(a.recent_pnl)}</div>` : "";
+  const mult = a.stake || 1;
+  const stakeLine = a.size == null ? "" : `<div class="sub" style="margin-top:6px">Trade size: <b class="${mult > 1 ? "up" : ""}">${money(a.size).replace(".00", "")} (×${mult})</b> ·
+      ${mult > 1 ? `earned: its last ${mult * 10} closed trades made money in every block of 10. A losing block drops it back to ×1.`
+              : "grows to ×2, ×3, then ×4 once its latest 20, 30, 40 closed trades made money in every block of 10."}</div>`;
   const what = crypto
     ? "copies STRONG crypto trades (≥ +1% expected after fees) by itself · max 5 per check · closes by each trader's learned rule, else take profit +6% / stop loss −2% · paper"
     : "buys STRONG congressional purchases (≥ +1% expected vs the market) by itself · max 5 per check · $1,000 each · sells on take profit +9%, stop loss −3%, after 30 days, or when the member sells · paper";
@@ -290,7 +298,7 @@ function autopilotCard(s, mk) {
     ? `<span class="pill on">AUTOPILOT ON${ap.forced ? " · EXPERIMENT" : ""}</span> <span class="sub">${what}</span>`
     : ap.resume ? `<span class="pill MIXED">PAUSED BY LOSS GUARD</span> <span class="sub">relearning from its losing trades, then resumes</span>`
     : unlocked ? `<span class="pill off">AUTOPILOT OFF</span> <span class="sub">unlocked: STRONG trades averaged +0.5% or more and beat WEAK ones live</span>`
-               : `<span class="pill off">AUTOPILOT LOCKED</span> <span class="sub">unlocks when STRONG trades average +0.5% or more and beat WEAK ones live. You can run it now as a paper experiment.</span>`) + stats;
+               : `<span class="pill off">AUTOPILOT LOCKED</span> <span class="sub">unlocks when STRONG trades average +0.5% or more and beat WEAK ones live. You can run it now as a paper experiment.</span>`) + stats + stakeLine;
   const btn = (on, force, label, primary) => `<button ${primary ? 'class="primary"' : ""} data-auto="${on}" data-market="${mk}" ${force ? 'data-force="1"' : ""}
       ${!on && ap.resume ? "disabled" : ""}>${label}</button>`;
   const autoBtn = ap.on ? btn("off", false, "Turn autopilot off") : unlocked ? btn("on", false, "Turn autopilot on", true)
@@ -331,7 +339,8 @@ function account(a, crypto) {
   if (!a) return `<div class="empty">Loading…</div>`;
   if (a.error) return `<div class="banner">${esc(a.error)}</div>`;
   const head = (a.stale ? `<div class="banner">${esc(a.stale)}</div>` : "") + `<div class="big">${money(a.equity)}</div>
-    <div class="meta">${signed(a.change)} ${crypto ? "since start" : "today"} · cash ${money(a.cash)}</div>`;
+    <div class="meta">${signed(a.change)} ${crypto ? "since start" : "today"} · cash ${money(a.cash)}</div>`
+    + (a.positions.length ? `<div class="meta">In positions: entered ${money(a.invested)} · now worth <b>${money(a.value)}</b> ${signed(a.value - a.invested)}</div>` : "");
   if (!a.positions.length) return head + `<div class="empty">No open positions</div>`;
   const rows = a.positions.map(p => crypto
     ? `<tr><td class="${p.side === "long" ? "up" : "down"}">${esc(p.side)}</td><td title="${esc(p.rule)}">${esc(p.coin)}${p.auto ? ` <span class="ago">auto</span>` : ""}<div class="ago">${esc(p.source)} · ${esc(p.rule)}</div></td>
@@ -361,7 +370,7 @@ function render(s) {
   document.title = s.pending.length ? `(${s.pending.length}) Trade Copier` : "Trade Copier";
   for (const mk of ["crypto", "stocks"]) {
     const mine = s.pending.filter(p => (p.kind === "crypto") === (mk === "crypto"))
-                          .sort((a, b) => (b.urgency || 0) - (a.urgency || 0));  // biggest congressional trades first
+                          .sort((a, b) => when(b) - when(a));  // newest first
     $("count-" + mk).textContent = mine.length;
     set("pending-" + mk, mine.length ? mine.map(card).join("") : `<div class="card empty">Nothing waiting. New trades show up here.</div>`);
     $("pending-" + mk).querySelectorAll("[data-act]").forEach(b => b.disabled = s.checking);
@@ -373,6 +382,14 @@ function render(s) {
   $("ap-dot").innerHTML = on.length ? `<span class="pill on" style="font-size:11px">${on.length} ON</span>` : "";
   document.querySelectorAll(".ago[data-ts]").forEach(e => e.textContent = "· " + ago(+e.dataset.ts));  // in place: no redraw
   set("scout", scoutCard(s.scout));
+  const accts = [s.crypto, s.stocks].filter(a => a && !a.error && a.invested != null);
+  const inv = accts.reduce((t, a) => t + a.invested, 0), val = accts.reduce((t, a) => t + a.value, 0);
+  $("totals-at").textContent = s.accounts_at ? `updates every minute · priced ${s.accounts_at}` : "";
+  set("totals", accts.length ? `<div class="mgrid">
+      <div><h3>Total entered</h3><div class="big">${money(inv)}</div><p class="sub">what you put into all open positions</p></div>
+      <div><h3>Worth now</h3><div class="big">${money(val)}</div><p class="sub">${signed(val - inv)} (${inv ? ((val / inv - 1) * 100).toFixed(2) : "0.00"}%)</p></div>
+      ${accts.length < 2 ? `<div><p class="sub">One account couldn't be priced right now, so this covers only the other.</p></div>` : ""}
+    </div>` : `<div class="empty">Loading…</div>`);
   set("crypto", account(s.crypto, true));
   set("stocks", account(s.stocks, false));
   set("traders", s.traders.length ? s.traders.map((t, i) => `<div><span>${i + 1}. ${esc(t.name)}</span>

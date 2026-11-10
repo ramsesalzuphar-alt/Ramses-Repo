@@ -336,10 +336,10 @@ def check_pelosi(pending, log):
         f.writelines(json.dumps(e) + "\n" for e in events)
 
 
-def decide_pelosi(item, auto=False):
-    """Place the approved order (auto=True: autopilot's own). Returns a short message for the activity log."""
+def decide_pelosi(item, auto=False, stake=1):
+    """Place the approved order (auto=True: autopilot's own; stake multiplies a buy's size). Returns a short message."""
     load_env()
-    _, action = plan_order(item["trade"], float(os.environ.get("DOLLARS_PER_TRADE", "1000")))
+    desc, action = plan_order(item["trade"], float(os.environ.get("DOLLARS_PER_TRADE", "1000")) * stake)
     if action[0] == "POST" and alpaca("GET", f"/v2/assets/{action[2]['symbol']}")[0] != 200:
         return f"Alpaca can't trade {action[2]['symbol']}, skipped"
     st, r = place(*action)
@@ -348,7 +348,7 @@ def decide_pelosi(item, auto=False):
         sources[action[2]["symbol"]] = {"rep": item["trade"].get("Representative"), "auto": auto,
                                          "opened": datetime.now().isoformat(timespec="seconds"), "feats": item.get("feats")}
         SOURCES_FILE.write_text(json.dumps(sources))
-    return f"Done: {item['label']}" if st < 300 else f"Failed ({st}): {r}"
+    return f"Done: {desc}" if st < 300 else f"Failed ({st}): {r}"
 
 
 def my_orders():
@@ -455,6 +455,7 @@ def stock_account():
         return {"error": f"Alpaca error {st}"}
     src = json.loads(SOURCES_FILE.read_text()) if SOURCES_FILE.exists() else {}
     return {"equity": float(a["equity"]), "change": float(a["equity"]) - float(a["last_equity"]), "cash": float(a["cash"]),
+            "invested": sum(float(p["cost_basis"]) for p in (ps or [])), "value": sum(float(p["market_value"]) for p in (ps or [])),
             "positions": [{"symbol": p["symbol"], "qty": float(p["qty"]), "entry": float(p["avg_entry_price"]),
                            "now": float(p["current_price"]), "pnl": float(p["unrealized_pl"]),
                            "source": rep_of(src.get(p["symbol"])) or "", "auto": is_auto(src.get(p["symbol"]))}

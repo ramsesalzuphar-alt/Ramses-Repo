@@ -4,7 +4,7 @@ New trades wait for your Copy/Skip; exits of copied trades happen automatically.
 Relearns daily. Each market (crypto, stocks) has its own autopilot that copies STRONG trades by itself; it only unlocks
 once that market's live track record proves an edge, or runs as a paper experiment if you start it.
 """
-import json, threading, time, traceback
+import json, os, threading, time, traceback
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,6 +18,8 @@ EXPIRE_AFTER = 10 * 60  # seconds a crypto trade waits for you
 MARKETS = ("crypto", "stocks")
 # loss guard: last 10 autopilot trades losing more than ~1% each on average -> pause + relearn ($100 crypto, $1000 stock copies)
 GUARD_LAST, GUARD_MAX_TRIPS, GUARD_LOSS = 10, 3, {"crypto": -10.0, "stocks": -100.0}
+BASE_SIZE = {"crypto": ("CRYPTO_DOLLARS_PER_TRADE", "100"), "stocks": ("DOLLARS_PER_TRADE", "1000")}  # .env setting, default
+STAKE_BLOCK, STAKE_MAX = 10, 4  # autopilot earns x2..x4 trade size by its latest blocks of 10 closed trades each making money
 KEEP = ("pending", "log", "traders", "last_check", "ap", "security")
 NEW_AP = {"on": False, "forced": False, "guard_since": "", "guard_trips": [], "resume": False}
 
@@ -29,7 +31,7 @@ if "ap" not in saved and "autopilot" in saved:  # state saved before stocks had 
                               "guard_trips": saved.get("guard_trips", []), "resume": saved.get("resume_after_retrain", False)}}
 S = {"pending": [], "log": [], "traders": [], "last_check": None, "security": [], **{k: v for k, v in saved.items() if k in KEEP},
      "crypto": None, "stocks": None, "next_check": None, "checking": False, "error": None, "training": False,
-     "model": None, "auto": {}, "scout": None}
+     "model": None, "auto": {}, "scout": None, "accounts_at": None}
 S["ap"] = {m: {**NEW_AP, **S.get("ap", {}).get(m, {})} for m in MARKETS}
 snapshot = b"{}"
 
@@ -49,13 +51,25 @@ def closed_trades(m):
     return [h for h in copier.stock_history() if h.get("auto")], sum(copier.is_auto(v) for v in sources.values())
 
 
+def stake(m):
+    """How much bigger autopilot's trades may be, earned by being consistently profitable: count its latest blocks
+    of 10 closed trades that each made money, newest first. 2 blocks -> x2, 3 -> x3, 4+ -> x4; a losing latest block -> x1."""
+    newest = [h["pnl"] for h in closed_trades(m)[0]][::-1]
+    k = 0
+    while len(newest) >= (k + 1) * STAKE_BLOCK and sum(newest[k * STAKE_BLOCK:(k + 1) * STAKE_BLOCK]) > 0:
+        k += 1
+    return 1 if k < 2 else min(k, STAKE_MAX)
+
+
 def auto_stats(m):
     """How a market's autopilot is doing. 'recent' = its trades closed since it was last (re)started."""
     closes, n_open = closed_trades(m)
     recent = [h for h in closes if h["time"] > ap(m)["guard_since"]][-GUARD_LAST:]
+    x = stake(m)
     return {"open": n_open, "closed": len(closes), "pnl": sum(h["pnl"] for h in closes),
             "won": sum(h["pnl"] > 0 for h in closes) / len(closes) if closes else None,
-            "recent_n": len(recent), "recent_pnl": sum(h["pnl"] for h in recent)}
+            "recent_n": len(recent), "recent_pnl": sum(h["pnl"] for h in recent),
+            "stake": x, "size": x * float(os.environ.get(*BASE_SIZE[m]))}
 
 
 def guard(m):
@@ -142,10 +156,12 @@ def run_autopilot(m):
         return
     mine = (lambda x: x["kind"] == "crypto") if m == "crypto" else (lambda x: x["kind"] == "pelosi" and x["side"] == "buy")
     strong = sorted((x for x in S["pending"] if mine(x) and x["score"] >= learn.STRONG), key=lambda x: -x["score"])
+    x = stake(m)
     for item in strong[:AUTO_MAX_PER_CHECK]:
         S["pending"].remove(item)
         try:
-            msg = crypto_copier.decide_crypto(item, auto=True) if m == "crypto" else copier.decide_pelosi(item, auto=True)
+            msg = (crypto_copier.decide_crypto(item, auto=True, stake=x) if m == "crypto"
+                   else copier.decide_pelosi(item, auto=True, stake=x)) + (f" (stake x{x}, earned by consistent profit)" if x > 1 else "")
             log(f"{m.title()} autopilot ({item['score']}): {msg}")
         except Exception as e:
             log(f"{m.title()} autopilot failed on {item['title']}: {e}")
@@ -205,6 +221,7 @@ def scout_log(msg):
 
 def refresh_accounts():
     S["scout"] = scout_summary()
+    S["accounts_at"] = datetime.now().strftime("%H:%M")  # runs every minute: the page shows when the totals were last priced
     for key, fn in (("crypto", crypto_copier.crypto_account), ("stocks", copier.stock_account)):
         try:
             S[key] = fn()

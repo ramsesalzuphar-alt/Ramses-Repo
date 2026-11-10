@@ -2,8 +2,9 @@
 import tempfile, pathlib, app, copier, crypto_copier
 app.APP_FILE = pathlib.Path(tempfile.mkdtemp()) / "state.json"   # never touch the running app's real state
 copied, bought, retrains = [], [], []
-crypto_copier.decide_crypto = lambda item, auto=False: copied.append((item["coin"], auto)) or f"Copied {item['coin']}"
-copier.decide_pelosi = lambda item, auto=False: bought.append((item["title"], auto)) or f"Bought {item['title']}"
+stakes = []
+crypto_copier.decide_crypto = lambda item, auto=False, stake=1: copied.append((item["coin"], auto)) or stakes.append(stake) or f"Copied {item['coin']}"
+copier.decide_pelosi = lambda item, auto=False, stake=1: bought.append((item["title"], auto)) or stakes.append(stake) or f"Bought {item['title']}"
 app.threading.Thread = lambda target, daemon: type("T", (), {"start": lambda self: retrains.append(target)})()
 ledger = {"start": 10000, "cash": 10000, "positions": {}, "history": []}
 crypto_copier.load_ledger = lambda: ledger
@@ -85,6 +86,22 @@ stock_hist += [{"time": "2099-01-04T00:00:00", "auto": True, "pnl": -15.0, "ret"
 app.guard("stocks"); assert not B["on"] and B["resume"] and app.S["auto"]["stocks"]["recent_pnl"] == -150.0
 assert "Stocks loss guard" in app.S["log"][0]["msg"]
 print("stock autopilot tests pass")
+
+# earned stake: x1 until its latest blocks of 10 closed trades each made money; x2/x3/x4 for 2/3/4+ blocks; a losing latest block -> x1
+def hist(*blocks):  # each block: total P&L of 10 trades, oldest block first
+    ledger["history"] = [{"time": "2099-02-01", "auto": True, "pnl": b / 10} for b in blocks for _ in range(10)]
+hist(+5); assert app.stake("crypto") == 1                      # one good block isn't "consistent"
+hist(-9, +5, +5); assert app.stake("crypto") == 2               # latest 2 blocks profitable
+hist(+5, +5, +5, +5, +5, +5); assert app.stake("crypto") == 4   # capped at x4
+hist(+5, +5, +5, -1); assert app.stake("crypto") == 1           # latest block lost: back to x1
+ledger["history"] += [{"time": "2099-02-02", "auto": True, "pnl": 0.1}] * 3; assert app.stake("crypto") == 1   # partial block doesn't count
+hist(+5, +5, +5)
+app.S["pending"] = [{"kind": "crypto", "coin": "Z", "title": "Z", "score": 90}]
+A["on"], A["forced"] = True, True; stakes.clear()
+app.run_autopilot("crypto")
+assert stakes == [3] and "stake x3" in app.S["log"][0]["msg"], (stakes, app.S["log"][0])
+assert app.auto_stats("crypto")["size"] == 300.0
+print("stake tests pass")
 
 # expire: crypto trades older than 10 min disappear; congressional trades (no seen_at) stay
 import time as _time
