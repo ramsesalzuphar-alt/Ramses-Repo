@@ -19,7 +19,7 @@ assert got == [("Purchase", "GOOGL", "ST"), ("Purchase", "AMZN", "OP"), ("Sale (
                ("Exchange", "VSNT", "ST"), ("Purchase", "", "AB")], got
 
 acts = [plan_order(r, 500)[1] for r in rows]
-assert acts[0][0] == "POST" and acts[0][2]["symbol"] == "GOOGL" and acts[0][2]["notional"] == "500"
+assert acts[0][0] == "POST" and acts[0][2]["symbol"] == "GOOGL" and acts[0][2]["notional"] == "500.00"
 assert acts[1] is None  # option: skipped
 assert acts[2] == ("DELETE", "/v2/positions/AAPL", None)
 assert acts[3] is None and acts[4] is None  # exchange, private LLC
@@ -232,3 +232,11 @@ assert g == {"dollar": "dollar rising · long", "rates": "rates rising · long",
 assert cp.global_features(world, "2026-09-10", "sell") == {}             # not 20 trading days of history yet
 assert cp.stock_features(mk("Bob Big", "BBB", "Sale", "$1,001 -"), world, "2026-09-28")["dollar"] == "dollar rising · sell"
 print("global influence tests pass")
+
+# win chance: from the trader's own model when they have one, else the pooled one
+pool = {"base": [100, 0.0, 0.5], "features": {"side": {"long": [100, 0.0, 0.5]}},
+        "traders": {"trader A": {"base": [50, 0.01, 0.8], "features": {"side": {"long": [50, 0.01, 0.8]}}}}}
+assert abs(cp.win_chance(pool, {"trader": "trader A", "side": "long"}) - 0.8) < 1e-9
+assert abs(cp.win_chance(pool, {"trader": "trader B", "side": "long"}) - 0.5) < 1e-9
+assert cp.predict(pool, {"side": "long"})[0] == 50      # predict unchanged by the split
+print("win chance tests pass")

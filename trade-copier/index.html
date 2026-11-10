@@ -292,7 +292,8 @@ function autopilotCard(s, mk) {
   const mult = a.stake || 1;
   const stakeLine = a.size == null ? "" : `<div class="sub" style="margin-top:6px">Trade size: <b class="${mult > 1 ? "up" : ""}">${money(a.size).replace(".00", "")} (×${mult})</b> ·
       ${mult > 1 ? `earned: its last ${mult * 10} closed trades made money in every block of 10. A losing block drops it back to ×1.`
-              : "grows to ×2, ×3, then ×4 once its latest 20, 30, 40 closed trades made money in every block of 10."}</div>`;
+              : "grows to ×2, ×3, then ×4 once its latest 20, 30, 40 closed trades made money in every block of 10."}
+      Each trade is then sized by the model's win chance: ≤50% → ½ size, 60% → normal, 70% → 1½×, 80%+ → 2×, never above 4× the base.</div>`;
   const what = crypto
     ? "copies STRONG crypto trades (≥ +1% expected after fees) by itself · max 5 per check · closes by each trader's learned rule, else take profit +6% / stop loss −2% · paper"
     : "buys STRONG congressional purchases (≥ +1% expected vs the market) by itself · max 5 per check · $1,000 each · sells on take profit +9%, stop loss −3%, after 30 days, or when the member sells · paper";

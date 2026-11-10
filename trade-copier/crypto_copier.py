@@ -7,7 +7,7 @@ import json, os, statistics, time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from copier import load_env, http, load_model, predict_for_trader, verdict, daily_closes, global_features, GLOBAL_SYMBOLS
+from copier import load_env, http, load_model, predict_for_trader, win_chance, verdict, daily_closes, global_features, GLOBAL_SYMBOLS
 
 HERE = Path(__file__).parent
 STATE_FILE = HERE / "crypto_state.json"
@@ -428,6 +428,7 @@ def check_crypto(pending, log):
                 feats.update(sentiment_feature(fng, when or now_ms))
                 feats.update(global_features(world, datetime.fromtimestamp((when or now_ms) / 1000, timezone.utc).date().isoformat(), side))
                 score, why = predict_for_trader(model, feats)
+                win = win_chance(model, feats)
                 agree = holders.count(side) - 1
                 why.append(f"{agree} other top trader(s) agree, {len(holders) - holders.count(side)} opposite")
                 if addr in scouted:
@@ -438,6 +439,7 @@ def check_crypto(pending, log):
                                if t["consistent"] else "scout: this trade is NOT one of their consistent patterns")
             else:
                 score, why = score_crypto(side, holders, s, churn[addr])
+                win = None
             # every new position is logged with its learned score, copied or not, so learn.py can grade it 24h later
             f.write(json.dumps({"t": now_ms, "addr": addr, "coin": coin, "side": side, "entered_at": when,
                                 "score": score if learned else None}) + "\n")
@@ -450,7 +452,7 @@ def check_crypto(pending, log):
                             "entered_at": when, "entry_px": their_px, "price_now": float(mids[coin]),
                             "volume": full[addr][coin][1],  # the trader's position size in $
                             "seen_at": int(datetime.now().timestamp() * 1000),
-                            "score": score, "verdict": verdict(score, 60 if model else 70), "why": why, "feats": feats})
+                            "score": score, "verdict": verdict(score, 60 if model else 70), "why": why, "feats": feats, "win": win})
     entered = [names[a] for a in tops if a not in old]
     if old and entered:
         log(f"Now watching: {', '.join(entered)} (recorded their current positions)")

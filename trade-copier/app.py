@@ -117,6 +117,12 @@ def stake(m):
     return 1 if k < 2 else min(k, STAKE_MAX)
 
 
+def confidence(win):
+    """Size factor from the model's chance this trade wins: 50% or less -> x0.5, 60% -> x1, 70% -> x1.5, 80%+ -> x2.
+    Unknown (rule-based score) -> x1."""
+    return 1.0 if win is None else min(2.0, max(0.5, 1 + (win - 0.6) * 5))
+
+
 def auto_stats(m):
     """How a market's autopilot is doing. 'recent' = its trades closed since it was last (re)started."""
     closes, n_open = closed_trades(m)
@@ -215,9 +221,15 @@ def run_autopilot(m):
     x = stake(m)
     for item in strong[:AUTO_MAX_PER_CHECK]:
         S["pending"].remove(item)
+        size = min(STAKE_MAX, x * confidence(item.get("win")))  # earned stake x confidence, never above x4 the base size
+        why = []
+        if x > 1:
+            why.append(f"stake x{x}")
+        if item.get("win") is not None:
+            why.append(f"{item['win']:.0%} win chance -> x{confidence(item['win']):.2g}")
         try:
-            msg = (crypto_copier.decide_crypto(item, auto=True, stake=x) if m == "crypto"
-                   else copier.decide_pelosi(item, auto=True, stake=x)) + (f" (stake x{x}, earned by consistent profit)" if x > 1 else "")
+            msg = (crypto_copier.decide_crypto(item, auto=True, stake=size) if m == "crypto"
+                   else copier.decide_pelosi(item, auto=True, stake=size)) + (f" ({', '.join(why)})" if why else "")
             log(f"{m.title()} autopilot ({item['score']}): {msg}")
         except Exception as e:
             log(f"{m.title()} autopilot failed on {item['title']}: {e}")

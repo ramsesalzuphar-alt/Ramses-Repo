@@ -71,10 +71,9 @@ def load_model(name):
         return None
 
 
-def predict(m, feats, k=20):
-    """Profit-first score (0-100) and reasons, from how past trades with the same traits turned out.
-    Score = 50 + expected profit after fees x 1000, so 60 = +1% expected, 45 = -0.5%, 100 = +5% or more.
-    Starts at the overall average and nudges it per trait; k shrinks traits with few examples toward the average."""
+def estimate(m, feats, k=20):
+    """(expected profit after fees, chance it wins, per-trait reasons) from how past trades with the same traits
+    turned out. Starts at the overall average and nudges it per trait; k shrinks traits with few examples toward it."""
     _, mean0, win0 = m["base"]
     win, mean, parts = win0, mean0, []
     for f, v in feats.items():
@@ -86,9 +85,21 @@ def predict(m, feats, k=20):
         win += wt * (w - win0)
         mean += wt * (mu - mean0)
         parts.append((abs(wt * (mu - mean0)), f"{v}: avg {mu:+.2%}, {w:.0%} won (n={n})"))  # ranked by profit impact
-    win = min(0.99, max(0.01, win))
+    return mean, min(0.99, max(0.01, win)), parts
+
+
+def predict(m, feats, k=20):
+    """Profit-first score (0-100) and reasons. Score = 50 + expected profit after fees x 1000,
+    so 60 = +1% expected, 45 = -0.5%, 100 = +5% or more."""
+    mean, win, parts = estimate(m, feats, k)
     why = [f"similar past trades: expected {mean:+.2%} after fees, {win:.0%} won"] + [p[1] for p in sorted(parts, reverse=True)[:3]]
     return round(min(100, max(0, 50 + mean * 1000))), why
+
+
+def win_chance(m, feats):
+    """The model's chance this trade wins, from the trader's own model when they have one (like predict_for_trader)."""
+    own = (m.get("traders") or {}).get(feats.get("trader"))
+    return estimate(own, {k: v for k, v in feats.items() if k != "trader"})[1] if own else estimate(m, feats)[1]
 
 
 def predict_for_trader(m, feats):
@@ -306,7 +317,7 @@ def plan_order(t, notional):
         return f"skip: no usable ticker ({sym!r})", None
     if "purchase" in kind:
         return f"Buy ${notional:.0f} of {sym}", ("POST", "/v2/orders",
-                {"symbol": sym, "notional": str(notional), "side": "buy", "type": "market", "time_in_force": "day"})
+                {"symbol": sym, "notional": f"{notional:.2f}", "side": "buy", "type": "market", "time_in_force": "day"})
     if "sale" in kind:
         return f"Sell all {sym} you hold", ("DELETE", f"/v2/positions/{sym}", None)
     return f"skip: unknown transaction type {kind!r}", None
@@ -353,9 +364,11 @@ def check_pelosi(pending, log):
         feats = stock_features(t, closes, today)
         if model:
             score, why = predict_for_trader(model, feats)
+            win = win_chance(model, feats)
         else:
             score, why = score_pelosi(t, date.today())
             why.append("rule-based: relearn to learn from every member's history")
+            win = None
         events.append({"t": int(datetime.now().timestamp() * 1000), "day": today, "rep": name, "sym": sym,
                        "kind": t["Transaction"], "score": score if model else None})
         lvl, label = urgency(t)
@@ -366,7 +379,7 @@ def check_pelosi(pending, log):
                         "urgency": lvl, "urgency_label": label,
                         "entered_at": int(datetime.strptime(t["TransactionDate"], "%m/%d/%Y").timestamp() * 1000),
                         "filed_at": int(datetime.strptime(t["ReportDate"], "%m/%d/%Y").timestamp() * 1000),
-                        "score": score, "verdict": verdict(score, 60 if model else 70), "why": why, "feats": feats})
+                        "score": score, "verdict": verdict(score, 60 if model else 70), "why": why, "feats": feats, "win": win})
     SEEN_FILE.write_text(json.dumps(sorted(seen)))
     SOURCES_FILE.write_text(json.dumps(sources))
     with STOCK_EVENTS.open("a") as f:  # every scored trade, copied or not, so learn.py can grade it a month later

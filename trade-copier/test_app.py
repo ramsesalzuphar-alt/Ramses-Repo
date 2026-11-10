@@ -147,3 +147,17 @@ assert calls == {"congress": 1, "crypto": 2}, calls
 app.last_congress -= 31 * 60; app.run_check()
 assert calls == {"congress": 2, "crypto": 3}, calls
 print("check interval tests pass")
+
+# sizing by win chance: x0.5 at 50% or less, x1 at 60%, x1.5 at 70%, x2 at 80%+; times the earned stake, capped at x4
+assert app.confidence(0.4) == 0.5 and app.confidence(0.6) == 1.0 and abs(app.confidence(0.7) - 1.5) < 1e-9
+assert app.confidence(0.95) == 2.0 and app.confidence(None) == 1.0
+A["on"], A["forced"] = True, True
+ledger["history"] = []                                   # no earned stake: x1
+app.S["pending"] = [{"kind": "crypto", "coin": "W", "title": "W", "score": 90, "win": 0.7}]
+stakes.clear(); app.run_autopilot("crypto")
+assert stakes == [1.5] and "70% win chance" in app.S["log"][0]["msg"], (stakes, app.S["log"][0])
+hist(+5, +5, +5)                                         # earned x3 ...
+app.S["pending"] = [{"kind": "crypto", "coin": "V", "title": "V", "score": 90, "win": 0.9}]
+stakes.clear(); app.run_autopilot("crypto")
+assert stakes == [4], stakes                             # ... x2 confidence would be x6: capped at x4
+print("win-chance sizing tests pass")
