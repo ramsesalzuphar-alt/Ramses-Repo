@@ -36,7 +36,7 @@ print("score tests pass")
 
 from copier import predict, pelosi_features
 from learn import fit, validate
-samples = [({"kind": "Purchase", "size": "$1M+"}, 0.05)] * 30 + [({"kind": "Sale", "size": "$1M+"}, -0.02)] * 30
+samples = [({"kind": "Purchase", "size": "$1M+"}, 0.05), ({"kind": "Sale", "size": "$1M+"}, -0.02)] * 30  # mixed through time
 m = fit(samples)
 assert m["base"][0] == 60 and abs(m["base"][2] - 0.5) < 1e-9
 buy, why = predict(m, {"kind": "Purchase", "size": "$1M+"})
@@ -79,8 +79,9 @@ print("pattern tests pass")
 # per-trader models: A wins when chasing, B wins when fading -> each scored by its own method
 from copier import predict_for_trader
 def trades(trader, good, bad, n):
-    return [({"trader": trader, "range": good}, 0.02)] * n + [({"trader": trader, "range": bad}, -0.02)] * n
-S = trades("A", "chasing", "fading", 30) + trades("B", "fading", "chasing", 30) + trades("C", "chasing", "fading", 5)
+    return [({"trader": trader, "range": good}, 0.02), ({"trader": trader, "range": bad}, -0.02)] * n
+S = [x for pair in zip(trades("A", "chasing", "fading", 30), trades("B", "fading", "chasing", 30)) for x in pair] \
+    + trades("C", "chasing", "fading", 5)
 pm = learn.fit_personal(S)
 assert set(pm["traders"]) == {"A", "B"}                                     # C has only 10 trades: no personal model
 a, why = predict_for_trader(pm, {"trader": "A", "range": "chasing"})
@@ -91,8 +92,8 @@ assert predict_for_trader(pm, {"trader": "C", "range": "chasing"})[0] == predict
 assert 40 <= predict(fit_pool := learn.fit([(dict((k, v) for k, v in f.items() if k != "trader"), r) for f, r in S]), {"range": "chasing"})[0] <= 60
 
 # habits: A chases 80% of the time vs 50% overall -> listed; best/worst conditions reported
-H2 = [({"trader": "A", "range": "chasing"}, 0.01)] * 40 + [({"trader": "A", "range": "fading"}, -0.01)] * 10 + \
-     [({"trader": "B", "range": "fading"}, 0.01)] * 40 + [({"trader": "B", "range": "chasing"}, -0.01)] * 10
+H2 = ([({"trader": "A", "range": "chasing"}, 0.01)] * 4 + [({"trader": "A", "range": "fading"}, -0.01)]) * 10 + \
+     ([({"trader": "B", "range": "fading"}, 0.01)] * 4 + [({"trader": "B", "range": "chasing"}, -0.01)]) * 10
 prof = {p["trader"]: p for p in learn.profiles(H2, learn.fit_personal(H2))}
 assert prof["A"]["style"] and prof["A"]["style"][0].startswith("chasing (80%"), prof["A"]
 assert prof["B"]["style"][0].startswith("fading (80%") and prof["B"]["best"][0]["when"] == "fading", prof["B"]
@@ -240,3 +241,24 @@ assert abs(cp.win_chance(pool, {"trader": "trader A", "side": "long"}) - 0.8) < 
 assert abs(cp.win_chance(pool, {"trader": "trader B", "side": "long"}) - 0.5) < 1e-9
 assert cp.predict(pool, {"side": "long"})[0] == 50      # predict unchanged by the split
 print("win chance tests pass")
+
+# member track record: only copies whose month had ended count, so learning never peeks at the future
+import learn as L3
+rows = [(f"2024-01-{d:02d}", {"trader": "member A"}, 0.02) for d in range(1, 26)] + [("2024-03-01", {"trader": "member A"}, -0.5)]
+L3.add_records(rows)
+assert rows[0][1]["record"] == "record: under 20 known trades"     # nothing known yet on day 1
+assert rows[-1][1]["record"] == "record: high win rate (55%+)"      # by March, all 25 January copies were known winners
+assert rows[-1][1]["gross"] == "record: high-grossing (+1%+ avg)"   # and its own -50% isn't counted
+assert L3.RECORDS["A"][0] == 26                                     # live scoring sees every graded copy
+assert cp.record_feature(None) == {"record": "record: under 20 known trades"}
+print("member record tests pass")
+
+# stable traits only: a trait that won early and lost later is dropped, one that held every third is kept
+mix = [({"t": "steady"}, 0.02), ({"t": "steady2"}, -0.02)] * 45
+flip = [({"t": "flip"}, 0.03 if i < 45 else -0.03) for i in range(90)]
+sm = fit([x for pair in zip(mix, flip) for x in pair])
+assert "steady" in sm["features"]["t"] and "flip" not in sm["features"]["t"], sm["features"]["t"]
+print("stable trait tests pass")
+
+assert predict_for_trader({**pm, "use_personal": False}, {"trader": "A", "range": "chasing"})[0] == predict(pm, {"trader": "A", "range": "chasing"})[0]
+print("personal-or-pooled tests pass")

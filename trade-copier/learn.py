@@ -9,9 +9,10 @@ Two honest tests:
              so this is the test that decides whether autopilot may unlock.
 Run: python learn.py   (the app also runs it daily; takes ~10 min)
 """
+from http.client import HTTPException
 import json, os, statistics, sys, time
 from datetime import date, datetime, timedelta, timezone
-from copier import (http, load_env, fetch_trades, stock_features, predict, predict_for_trader, daily_closes, stock_history,
+from copier import (http, load_env, fetch_trades, stock_features, record_feature, predict, predict_for_trader, daily_closes, stock_history,
                     global_features, GLOBAL_SYMBOLS,
                     MODEL_FILE, CONGRESS_CACHE, STOCK_EVENTS)
 from crypto_copier import (top_traders, crypto_features, is_new_position, candles_5m, minute_features, load_ledger,
@@ -22,15 +23,29 @@ H = 3_600_000  # one hour in ms
 STRONG, WEAK, MIN_EACH = 60, 45, 20  # live test: STRONG trades must beat WEAK ones, with at least 20 of each
 
 
+STABLE_N = 10  # examples a trait needs in every third of history to count
+
+
 def fit(samples):
     """samples: [(traits, outcome)]. Model = for every trait value: [count, average outcome, share that made money]."""
     def stat(rs):
         return [len(rs), statistics.fmean(rs), sum(r > 0 for r in rs) / len(rs)]
-    by = {}
-    for f, r in samples:
-        for k, v in f.items():
-            by.setdefault(k, {}).setdefault(v, []).append(r)
-    return {"base": stat([r for _, r in samples]), "features": {k: {v: stat(rs) for v, rs in d.items()} for k, d in by.items()}}
+    def raw(ss):
+        by = {}
+        for f, r in ss:
+            for k, v in f.items():
+                by.setdefault(k, {}).setdefault(v, []).append(r)
+        return {"base": stat([r for _, r in ss]), "features": {k: {v: stat(rs) for v, rs in d.items()} for k, d in by.items()}}
+    m = raw(samples)
+    # Keep only traits that pushed the same way in each third of history (samples are oldest first). A trait that
+    # helped in one stretch and hurt in another is luck or a passing market mood, and it made high scores lose.
+    thirds = [raw(samples[i * len(samples) // 3:(i + 1) * len(samples) // 3]) for i in range(3)] if len(samples) >= 30 else []
+    for k, vals in m["features"].items():
+        for v in list(vals):
+            d = vals[v][1] - m["base"][1]
+            if not all((s := t["features"].get(k, {}).get(v)) and s[0] >= STABLE_N and (s[1] - t["base"][1]) * d > 0 for t in thirds):
+                del vals[v]
+    return m
 
 
 def summ(rs):
@@ -90,7 +105,8 @@ def validate(samples, fit_fn=fit, predict_fn=predict):
     m, test = fit_fn(samples[:cut]), samples[cut:]
     scored = [(predict_fn(m, f)[0], r) for f, r in test]
     hi, lo = [r for s, r in scored if s >= 55], [r for s, r in scored if s < 45]
-    return {"all": summ([r for _, r in scored]), "high": summ(hi), "low": summ(lo), "edge": has_edge(hi, lo)}
+    return {"all": summ([r for _, r in scored]), "high": summ(hi), "low": summ(lo), "edge": has_edge(hi, lo),
+            "spread": statistics.fmean(hi) - statistics.fmean(lo) if hi and lo else 0.0}  # how well it ranks trades
 
 
 HOLD_DAYS = 21  # trading days a congressional copy is judged over (about a month)
@@ -138,9 +154,31 @@ def congress_samples(since_year=2022):
         r = excess_after(bars, spy, spy_day, t["Ticker"], filed, t["Transaction"] != "Purchase")
         if r is not None:
             out.append((filed, stock_features(t, bars, filed), r))
+    out.sort(key=lambda x: x[0])
+    add_records(out)
     own = [(h["feats"], h["ret"]) for h in stock_history() if h.get("feats") and "ret" in h]
     print(f"  {len(out)} graded; + {len(own)} of its own closed stock trades (real wins and losses)", flush=True)
-    return [(f, r) for _, f, r in sorted(out, key=lambda x: x[0])] + own
+    return [(f, r) for _, f, r in out] + own
+
+
+RECORDS = {}  # member -> [n, wins, total] of every graded copy, saved in the model for live scoring
+
+
+def add_records(dated):
+    """Give each trade its member's track record AS IT WAS when filed: only copies whose month had already ended
+    (filed 35+ days before), so the model never peeks at outcomes it couldn't have known."""
+    RECORDS.clear()
+    known, j = {}, 0
+    for filed, f, r in dated:
+        cutoff = (date.fromisoformat(filed) - timedelta(days=35)).isoformat()
+        while j < len(dated) and dated[j][0] <= cutoff:
+            k = known.setdefault(dated[j][1]["trader"], [0, 0, 0.0])
+            k[0], k[1], k[2] = k[0] + 1, k[1] + (dated[j][2] > 0), k[2] + dated[j][2]
+            j += 1
+        f.update(record_feature(known.get(f["trader"])))
+    for _, f, r in dated:
+        k = RECORDS.setdefault(f["trader"].replace("member ", ""), [0, 0, 0.0])
+        k[0], k[1], k[2] = k[0] + 1, k[1] + (r > 0), k[2] + r
 
 
 def hl(body):
@@ -149,7 +187,7 @@ def hl(body):
         time.sleep(wait)
         try:
             st, d = http("POST", "https://api.hyperliquid.xyz/info", {}, body)
-        except OSError as e:
+        except (OSError, HTTPException) as e:  # HTTPException: a reply cut off mid-way
             err = e
             continue
         if st == 200:
@@ -231,7 +269,7 @@ def crypto_samples(n_traders=60, per_trader=300):
         if ":" not in c and not c.startswith("@"):
             try:
                 five[c] = candles_5m(c, now - 18 * 24 * H, now)
-            except RuntimeError:
+            except Exception:  # one coin's candles failing just loses its minute patterns
                 five[c] = []
             time.sleep(0.5)
     out = []
@@ -315,8 +353,13 @@ def main():
         v = validate(samples)
         # per-trader models: each crypto trader / each House member, learned only from their own trades
         vp = validate(samples, fit_personal, predict_for_trader)
-        model[name] = {**fit_personal(samples), "validation": v, "validation_personal": vp, "n": len(samples)}
+        model[name] = {**fit_personal(samples), "validation": v, "validation_personal": vp, "n": len(samples),
+                       # score with per-trader models only while they rank trades better than the pooled one
+                       "use_personal": vp["spread"] > v["spread"]}
+        print(f"  scoring with {'per-trader' if model[name]['use_personal'] else 'pooled'} models (better backtest)")
         model[name]["profiles"] = profiles(samples, model[name])
+        if name == "congress":
+            model[name]["records"] = dict(RECORDS)
         print(f"  per-trader models for {len(model[name]['traders'])} traders. Backtest, per-trader vs pooled:")
         print(f"    per-trader scored 55+: {vp['high']}\n    per-trader under 45:  {vp['low']}")
         print(f"  {G + 'per-trader models show some edge' if vp['edge'] else R + 'per-trader models: no proven edge yet'}{X}")

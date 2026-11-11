@@ -75,17 +75,20 @@ def estimate(m, feats, k=20):
     """(expected profit after fees, chance it wins, per-trait reasons) from how past trades with the same traits
     turned out. Starts at the overall average and nudges it per trait; k shrinks traits with few examples toward it."""
     _, mean0, win0 = m["base"]
-    win, mean, parts = win0, mean0, []
+    dw, dm, parts = [], [], []
     for f, v in feats.items():
         s = m["features"].get(f, {}).get(v)
         if not s:
             continue
         n, mu, w = s
         wt = n / (n + k)
-        win += wt * (w - win0)
-        mean += wt * (mu - mean0)
+        dw.append(wt * (w - win0))
+        dm.append(wt * (mu - mean0))
         parts.append((abs(wt * (mu - mean0)), f"{v}: avg {mu:+.2%}, {w:.0%} won (n={n})"))  # ranked by profit impact
-    return mean, min(0.99, max(0.01, win)), parts
+    # traits overlap (oil up and the dollar up often say the same thing): divide by sqrt(count) so they aren't
+    # all counted in full; plain adding made scores overconfident
+    shrink = len(dm) ** 0.5 or 1
+    return mean0 + sum(dm) / shrink, min(0.99, max(0.01, win0 + sum(dw) / shrink)), parts
 
 
 def predict(m, feats, k=20):
@@ -98,13 +101,13 @@ def predict(m, feats, k=20):
 
 def win_chance(m, feats):
     """The model's chance this trade wins, from the trader's own model when they have one (like predict_for_trader)."""
-    own = (m.get("traders") or {}).get(feats.get("trader"))
+    own = (m.get("traders") or {}).get(feats.get("trader")) if m.get("use_personal", True) else None
     return estimate(own, {k: v for k, v in feats.items() if k != "trader"})[1] if own else estimate(m, feats)[1]
 
 
 def predict_for_trader(m, feats):
     """Score with the trader's own model (learned only from their trades) when they have one, else the pooled model."""
-    own = (m.get("traders") or {}).get(feats.get("trader"))
+    own = (m.get("traders") or {}).get(feats.get("trader")) if m.get("use_personal", True) else None
     if not own:
         return predict(m, feats)
     score, why = predict(own, {k: v for k, v in feats.items() if k != "trader"})
@@ -299,6 +302,18 @@ def stock_features(t, closes, day):
             **global_features(closes, day, "buy" if t["Transaction"] == "Purchase" else "sell")}
 
 
+def record_feature(rec):
+    """How copying this member had gone before this trade, [n, wins, total excess return] of copies whose month was
+    already over: is this a high-winning or a high-grossing member? Same for learning and live scoring."""
+    n, wins, total = rec or (0, 0, 0.0)
+    if n < 20:
+        return {"record": "record: under 20 known trades"}
+    return {"record": "record: high win rate (55%+)" if wins / n >= 0.55 else "record: poor win rate (<45%)" if wins / n < 0.45
+            else "record: average win rate",
+            "gross": "record: high-grossing (+1%+ avg)" if total / n >= 0.01 else "record: losing (-1%+ avg)" if total / n <= -0.01
+            else "record: about even"}
+
+
 def is_auto(src):
     return isinstance(src, dict) and bool(src.get("auto"))
 
@@ -363,6 +378,7 @@ def check_pelosi(pending, log):
                 continue
         feats = stock_features(t, closes, today)
         if model:
+            feats.update(record_feature((model.get("records") or {}).get(name)))
             score, why = predict_for_trader(model, feats)
             win = win_chance(model, feats)
         else:

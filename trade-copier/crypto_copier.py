@@ -3,6 +3,7 @@ Watches the top Hyperliquid traders. A new position becomes a proposal you appro
 closed automatically as soon as THAT trader no longer holds it, even if they've dropped out of the top list.
 Optional .env: CRYPTO_DOLLARS_PER_TRADE (default 100), CRYPTO_TOP_N (default 5), CRYPTO_START_CASH (default 10000)
 """
+from http.client import HTTPException
 import json, os, statistics, time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -96,7 +97,7 @@ def hl(body):
             st, d = http("POST", "https://api.hyperliquid.xyz/info", {}, body)
             if st != 429 or wait is None:
                 break
-        except OSError:
+        except (OSError, HTTPException):  # HTTPException: a reply cut off mid-way (IncompleteRead)
             if wait is None:
                 raise
         time.sleep(wait)
