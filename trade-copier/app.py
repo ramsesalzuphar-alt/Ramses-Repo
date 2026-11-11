@@ -9,6 +9,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import copier, crypto_copier, learn, scout
+copier.load_env()  # .env settings (trade sizes) before the first page load
 
 HERE = Path(__file__).parent
 APP_FILE = HERE / "app_state.json"  # waiting proposals + activity log, so a restart loses nothing
@@ -253,6 +254,8 @@ def log(msg):
 def publish():
     """Save to disk and refresh the JSON the page reads (so page reads never wait on a running check)."""
     global snapshot
+    S["dollars"] = {"crypto": float(os.environ.get("CRYPTO_DOLLARS_PER_TRADE", "100")),  # default trade sizes, for the cards
+                    "stocks": float(os.environ.get("DOLLARS_PER_TRADE", "1000"))}
     APP_FILE.write_text(json.dumps({k: S[k] for k in KEEP}, indent=1))
     snapshot = json.dumps(S).encode()
 
@@ -364,7 +367,20 @@ def loop_once():
             publish()
 
 
-def decide(item_id, approve):
+def num(x):
+    """A positive, finite number from the page, else None."""
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return None
+    return x if 0 < x < 1e12 else None
+
+
+def decide(item_id, approve, limit=None, qty=None):
+    """limit + qty: your own price and amount (shares / coins) instead of the default size at the market price."""
+    limit, qty = num(limit), num(qty)
+    if (limit is None) != (qty is None):
+        return "Enter both a price and an amount, or neither"
     with lock:
         item = next((x for x in S["pending"] if x["id"] == item_id), None)
         if not item:
@@ -374,7 +390,7 @@ def decide(item_id, approve):
             msg = f"Skipped: {item['title']}"
         else:
             try:
-                msg = (copier.decide_pelosi if item["kind"] == "pelosi" else crypto_copier.decide_crypto)(item)
+                msg = (copier.decide_pelosi if item["kind"] == "pelosi" else crypto_copier.decide_crypto)(item, limit=limit, qty=qty)
             except Exception as e:
                 msg = f"Failed: {e}"
         log(msg)
@@ -441,7 +457,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"forbidden", "text/plain")
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
         if self.path == "/api/decide":
-            msg = decide(str(body.get("id")), bool(body.get("approve")))
+            msg = decide(str(body.get("id")), bool(body.get("approve")), body.get("limit"), body.get("qty"))
         elif self.path == "/api/close":
             msg = close(str(body.get("coin")))
         elif self.path == "/api/check":

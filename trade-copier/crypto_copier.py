@@ -351,13 +351,14 @@ def scout_exit(addr):
 def exit_check(log):
     """Quick check between full checks (every minute): take profit / stop loss, then exits of the traders you copied."""
     ledger = load_ledger()
-    before = len(ledger["positions"])
+    before = len(ledger["positions"]), len(ledger.get("orders", {}))
     mids = hl({"type": "allMids"})
+    fill_orders(ledger, mids, log)
     target_exits(ledger, mids, log)
     copied = {p["source"] for p in ledger["positions"].values() if p.get("source")}
     if copied:
         auto_exits(ledger, {a: positions(a) for a in copied}, mids, log)
-    if len(ledger["positions"]) != before:
+    if (len(ledger["positions"]), len(ledger.get("orders", {}))) != before:
         save_ledger(ledger)
 
 
@@ -382,6 +383,7 @@ def check_crypto(pending, log):
     full = {a: positions_full(a) for a in set(tops) | copied}  # keep watching traders you copied, even off the top list
     new = {a: {c: side for c, (side, _) in f.items()} for a, f in full.items()}
 
+    fill_orders(ledger, mids, log)
     target_exits(ledger, mids, log)
     auto_exits(ledger, new, mids, log)
     pending[:] = [x for x in pending if x["kind"] != "crypto" or new.get(x["addr"], {}).get(x["coin"]) == x["side"]]
@@ -463,27 +465,69 @@ def check_crypto(pending, log):
              "shorts": sum(s == "short" for s in new[a].values())} for pnl, a, _ in top]
 
 
-def decide_crypto(item, auto=False, stake=1):
-    """Copy an approved proposal at the live price, if the trader still holds it. stake multiplies the trade size
-    (autopilot earns more than x1 by being consistently profitable). Returns a message."""
+ORDER_HOURS = 24  # an unfilled price order is cancelled after this
+
+
+def reached(side, mid, limit):
+    """Has the price come to your limit? A long fills at or below it, a short at or above it."""
+    return mid <= limit if side == "long" else mid >= limit
+
+
+def decide_crypto(item, auto=False, stake=1, limit=None, qty=None):
+    """Copy an approved proposal, if the trader still holds it. stake multiplies the trade size (autopilot earns more
+    than x1 by being consistently profitable). limit + qty: your own price and amount (coins); if the market isn't
+    there yet it waits as an order, filled by fill_orders once it is. Returns a message."""
     load_env()
     dollars = float(os.environ.get("CRYPTO_DOLLARS_PER_TRADE", "100")) * stake
     ledger, coin, side = load_ledger(), item["coin"], item["side"]
-    if coin in ledger["positions"]:
-        return f"You already hold {coin}, not copied"
+    if limit:
+        dollars = limit * qty
+    if coin in ledger["positions"] or coin in ledger.get("orders", {}):
+        return f"You already hold or have an order for {coin}, not copied"
     if positions(item["addr"]).get(coin) != side:
         return f"{short_addr(item['addr'])} already exited {coin}, not copied"
     if ledger["cash"] < dollars * (1 + FEE):
         return f"Not enough paper cash ({money(ledger['cash'])})"
     px = float(hl({"type": "allMids"})[coin])
+    if limit and not reached(side, px, limit):
+        ledger.setdefault("orders", {})[coin] = {"side": side, "limit": limit, "qty": qty, "source": item["addr"],
+                                                 "feats": item.get("feats"), "placed": datetime.now().isoformat(timespec="seconds")}
+        save_ledger(ledger)
+        return (f"Order placed: {side} {qty:.6g} {coin} at ${limit:,.6g} (${dollars:,.2f}); now ${px:,.6g}. "
+                f"Fills when the price gets there, cancelled after {ORDER_HOURS}h")
+    if limit:  # already at or past your price: you get it now, at the market price (yours or better)
+        dollars = px * qty
     rule = scout_exit(item["addr"]) if auto else None  # autopilot closes each trader's copies by that trader's learned rule
     open_pos(ledger, coin, side, dollars, px, item["addr"], item.get("feats"), auto, rule)
     save_ledger(ledger)
-    return f"Copied: {side} ${dollars:.0f} of {coin} at ${px:,.6g}" + (f" · close rule: {rule['name']}" if rule else "")
+    return f"Copied: {side} ${dollars:,.2f} of {coin} at ${px:,.6g}" + (f" · close rule: {rule['name']}" if rule else "")
+
+
+def fill_orders(ledger, mids, log):
+    """Every minute: fill waiting price orders the market reached, at your price; cancel expired ones."""
+    orders = ledger.get("orders", {})
+    for coin, o in list(orders.items()):
+        if coin not in mids:
+            continue
+        if datetime.now() - datetime.fromisoformat(o["placed"]) > timedelta(hours=ORDER_HOURS):
+            del orders[coin]
+            log(f"Cancelled {o['side']} order for {coin} at ${o['limit']:,.6g}: not reached in {ORDER_HOURS}h")
+        elif reached(o["side"], float(mids[coin]), o["limit"]):
+            del orders[coin]
+            dollars = o["limit"] * o["qty"]
+            if coin in ledger["positions"] or ledger["cash"] < dollars * (1 + FEE):
+                log(f"Cancelled {o['side']} order for {coin}: " + ("you already hold it" if coin in ledger["positions"] else "not enough paper cash"))
+                continue
+            open_pos(ledger, coin, o["side"], dollars, o["limit"], o["source"], o.get("feats"))
+            log(f"Order filled: {o['side']} {o['qty']:.6g} {coin} at ${o['limit']:,.6g} (${dollars:,.2f})")
 
 
 def close_manual(coin):
     ledger = load_ledger()
+    if coin in ledger.get("orders", {}):
+        del ledger["orders"][coin]
+        save_ledger(ledger)
+        return f"Cancelled your {coin} order"
     if coin not in ledger["positions"]:
         return f"No {coin} position"
     pnl = close_pos(ledger, coin, float(hl({"type": "allMids"})[coin]))
@@ -510,4 +554,6 @@ def crypto_account():
             "positions": [{"coin": c, "side": p["side"], "entry": p["entry"], "now": float(mids.get(c, p["entry"])),
                            "pnl": pnl_of(p, float(mids.get(c, p["entry"]))), "source": short_addr(p["source"]) if p.get("source") else "?",
                            "auto": bool(p.get("auto")), "rule": rule_text(p)}
-                          for c, p in sorted(ledger["positions"].items())]}
+                          for c, p in sorted(ledger["positions"].items())],
+            "orders": [{"coin": c, "side": o["side"], "limit": o["limit"], "qty": o["qty"], "now": float(mids.get(c, o["limit"])),
+                        "source": short_addr(o["source"])} for c, o in sorted(ledger.get("orders", {}).items())]}

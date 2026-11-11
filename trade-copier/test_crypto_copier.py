@@ -167,3 +167,30 @@ try:
 except RuntimeError as e:
     assert "429" in str(e)
 print("request retry tests pass")
+
+# your own price: fills now if the market is already there, otherwise waits and fills (at your price) when reached
+import importlib, tempfile as _tf3, pathlib as _pl3
+cc = importlib.reload(cc)
+cc.LEDGER_FILE = _pl3.Path(_tf3.mkdtemp()) / "ledger.json"
+cc.positions = lambda a: {"ETH": "long", "SOL": "short"}
+mids = {"ETH": "2000", "SOL": "100"}
+cc.hl = lambda body: mids
+item = lambda coin, side: {"coin": coin, "side": side, "addr": "0xabc", "feats": None}
+msg = cc.decide_crypto(item("ETH", "long"), limit=1900, qty=0.1)            # long below the market: waits
+assert msg.startswith("Order placed") and "ETH" in cc.load_ledger()["orders"], msg
+assert "already" in cc.decide_crypto(item("ETH", "long"), limit=1900, qty=0.1)   # one order or position per coin
+msg = cc.decide_crypto(item("SOL", "short"), limit=95, qty=2)               # short below the market: already there, fills now
+assert msg.startswith("Copied") and cc.load_ledger()["positions"]["SOL"]["entry"] == 100, msg
+mids["ETH"] = "1890"
+log = []; cc.exit_check(log.append)
+L = cc.load_ledger()
+assert "ETH" in L["positions"] and L["positions"]["ETH"]["entry"] == 1900 and not L["orders"], (log, L)
+assert abs(L["positions"]["ETH"]["margin"] - 190) < 1e-9 and "filled" in log[0]
+cc.decide_crypto(item("SOL", "short"), limit=1, qty=1)                      # already held
+L = cc.load_ledger(); L["orders"]["BTC"] = {"side": "long", "limit": 1, "qty": 1, "source": "0xabc", "feats": None, "placed": "2020-01-01T00:00:00"}
+mids["BTC"] = "50000"; log = []; cc.fill_orders(L, mids, log.append)
+assert "BTC" not in L["orders"] and "not reached" in log[0]                  # expired after 24h
+L["orders"]["BTC"] = {**{"side": "long", "limit": 1, "qty": 1, "source": "0xabc", "feats": None}, "placed": "2099-01-01T00:00:00"}
+cc.save_ledger(L)
+assert cc.close_manual("BTC") == "Cancelled your BTC order" and "BTC" not in cc.load_ledger()["orders"]
+print("your-price order tests pass")

@@ -71,6 +71,10 @@
   .MIXED { background: var(--amber-bg); color: var(--amber); }  .MIXED-bar { background: var(--amber); }
   .WEAK { background: var(--red-bg); color: var(--red); }       .WEAK-bar { background: var(--red); }
   ul.why { margin: 6px 0 14px; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  .order { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 10px 0; font-size: 13px; }
+  .order label { display: flex; flex-direction: column; gap: 2px; color: var(--muted, #666); }
+  .order input { width: 110px; padding: 6px 8px; font: inherit; border: 1px solid #ccc; border-radius: 6px; }
+  .order .total { padding-bottom: 7px; } .order .total b { font-variant-numeric: tabular-nums; }
   .actions { display: flex; gap: 8px; }
   .actions .primary { flex: 1; }
   .empty { color: var(--muted); text-align: center; padding: 26px 16px; }
@@ -235,6 +239,36 @@ function volume(p) {  // how much money is behind the trade: the trader's positi
 // how recent a trade is: congress = when it was filed publicly; crypto = when the trader entered (or when it was spotted)
 const when = p => p.filed_at || p.entered_at || p.seen_at || 0;
 
+// your own price and amount for an entry (crypto, or a stock buy); kept while you type, across redraws
+const drafts = {};
+let DOLLARS = {crypto: 100, stocks: 1000};
+function orderOf(p) {
+  if (p.kind === "pelosi" && p.side !== "buy") return null;  // a sale just sells what you hold
+  if (drafts[p.id]) return drafts[p.id];
+  const px = p.price_now || p.entry_px;
+  const qty = px ? DOLLARS[p.kind === "crypto" ? "crypto" : "stocks"] / px : "";
+  return {limit: px ? +px.toPrecision(6) : "", qty: qty ? +(p.kind === "crypto" ? qty.toPrecision(4) : qty.toFixed(2)) : ""};
+}
+const totalOf = o => o.limit > 0 && o.qty > 0 ? `= <b>$${(o.limit * o.qty).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</b>` : "enter both";
+function orderBox(p) {
+  const o = orderOf(p);
+  if (!o) return "";
+  const unit = p.kind === "crypto" ? p.coin : "shares";
+  return `<div class="order" data-order="${esc(p.id)}">
+    <label>Price ($ each)<input data-f="limit" inputmode="decimal" value="${esc(String(o.limit))}"></label>
+    <label>Amount (${esc(unit)})<input data-f="qty" inputmode="decimal" value="${esc(String(o.qty))}"></label>
+    <span class="total">${totalOf(o)}</span>
+    <span class="ago" style="flex-basis:100%">${p.kind === "crypto" ? "Fills now if the market is at your price or better, otherwise waits up to 24h"
+      : "A limit order: fills at your price or better, cancelled at today's close if not"}</span></div>`;
+}
+
+document.addEventListener("input", e => {
+  const box = e.target.closest("[data-order]");
+  if (!box) return;
+  const o = drafts[box.dataset.order] = {limit: box.querySelector('[data-f="limit"]').value, qty: box.querySelector('[data-f="qty"]').value};
+  box.querySelector(".total").innerHTML = totalOf({limit: +o.limit, qty: +o.qty});
+});
+
 function card(p) {
   const up = p.side === "buy" || p.side === "long";
   return `<div class="card">
@@ -249,8 +283,9 @@ function card(p) {
       <div class="bar"><span class="${p.verdict}-bar" style="width:${p.score}%"></span></div>
       <span class="pill ${p.verdict}">${p.verdict}</span></div>
     <ul class="why">${p.why.map(w => `<li>${esc(w)}</li>`).join("")}</ul>
+    ${orderBox(p)}
     <div class="actions">
-      <button class="primary" data-act="yes" data-id="${esc(p.id)}">Copy · ${esc(p.label)}</button>
+      <button class="primary" data-act="yes" data-id="${esc(p.id)}">${orderOf(p) ? "Copy at this price" : `Copy · ${esc(p.label)}`}</button>
       <button data-act="no" data-id="${esc(p.id)}">Skip</button>
     </div></div>`;
 }
@@ -361,7 +396,13 @@ function account(a, crypto) {
   const head = (a.stale ? `<div class="banner">${esc(a.stale)}</div>` : "") + `<div class="big">${money(a.equity)}</div>
     <div class="meta">${signed(a.change)} ${crypto ? "since start" : "today"} · cash ${money(a.cash)}</div>`
     + (a.positions.length ? `<div class="meta">In positions: entered ${money(a.invested)} · now worth <b>${money(a.value)}</b> ${signed(a.value - a.invested)}</div>` : "");
-  if (!a.positions.length) return head + `<div class="empty">No open positions</div>`;
+  const orders = (a.orders || []).length ? `<div class="meta" style="margin-top:10px"><b>Waiting for your price</b></div><div class="scroll"><table>
+      <tr><th>Side</th><th>Coin</th><th class="r">Amount</th><th class="r">Your price</th><th class="r">Now</th><th class="r">Total</th><th></th></tr>`
+    + a.orders.map(o => `<tr><td class="${o.side === "long" ? "up" : "down"}">${esc(o.side)}</td><td>${esc(o.coin)}<div class="ago">${esc(o.source)}</div></td>
+        <td class="r">${o.qty.toPrecision(4)}</td><td class="r">${price(o.limit)}</td><td class="r">${price(o.now)}</td><td class="r">${money(o.limit * o.qty)}</td>
+        <td class="r"><button class="small${armed === o.coin ? " danger" : ""}" data-close="${esc(o.coin)}" aria-label="Cancel ${esc(o.coin)} order">${armed === o.coin ? "Confirm cancel" : "Cancel"}</button></td></tr>`).join("")
+    + `</table></div>` : "";
+  if (!a.positions.length) return head + `<div class="empty">No open positions</div>` + orders;
   const rows = a.positions.map(p => crypto
     ? `<tr><td class="${p.side === "long" ? "up" : "down"}">${esc(p.side)}</td><td title="${esc(p.rule)}">${esc(p.coin)}${p.auto ? ` <span class="ago">auto</span>` : ""}<div class="ago">${esc(p.source)} · ${esc(p.rule)}</div></td>
          <td class="r">${price(p.entry)}</td><td class="r">${price(p.now)}</td><td class="r">${signed(p.pnl)}</td>
@@ -370,16 +411,18 @@ function account(a, crypto) {
          <td class="r">${price(p.now)}</td><td class="r">${signed(p.pnl)}</td></tr>`).join("");
   const cols = crypto ? `<th>Side</th><th>Coin</th><th class="r">Entry</th><th class="r">Now</th><th class="r">P&amp;L</th><th></th>`
                       : `<th>Stock</th><th class="r">Qty</th><th class="r">Entry</th><th class="r">Now</th><th class="r">P&amp;L</th>`;
-  return head + `<div class="scroll"><table><tr>${cols}</tr>${rows}</table></div>`;
+  return head + `<div class="scroll"><table><tr>${cols}</tr>${rows}</table></div>` + orders;
 }
 
 function set(id, html) {  // only redraw when something changed, so clicks aren't lost to a redraw mid-click
   const el = $(id);
+  if (el.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;  // don't wipe what you're typing
   if (el._html !== html) { el.innerHTML = html; el._html = html; }
 }
 
 function render(s) {
   busy = s.checking;
+  if (s.dollars) DOLLARS = s.dollars;
   $("status").textContent = s.checking ? "Checking…" : `Last check ${s.last_check || "—"}` + (s.next_check ? ` · next ${s.next_check}` : "");
   $("check").disabled = s.checking;
   set("error", (s.security && s.security.length ? `<div class="banner"><b>Rotate your Alpaca keys now.</b> Your paper account has
@@ -434,7 +477,14 @@ async function load() {
 document.addEventListener("click", e => {
   const b = e.target.closest("button");
   if (!b || b.disabled) return;
-  if (b.dataset.act) { b.disabled = true; post("/api/decide", {id: b.dataset.id, approve: b.dataset.act === "yes"}); }
+  if (b.dataset.act) {
+    const box = b.dataset.act === "yes" && document.querySelector(`[data-order="${CSS.escape(b.dataset.id)}"]`);
+    const limit = box && +box.querySelector('[data-f="limit"]').value, qty = box && +box.querySelector('[data-f="qty"]').value;
+    if (box && !(limit > 0 && qty > 0)) return toast("Enter a price and an amount above 0");
+    b.disabled = true;
+    delete drafts[b.dataset.id];
+    post("/api/decide", {id: b.dataset.id, approve: b.dataset.act === "yes", ...(box ? {limit, qty} : {})});
+  }
   else if (b.dataset.close) {
     clearTimeout(armTimer);
     if (armed === b.dataset.close) { armed = null; b.disabled = true; post("/api/close", {coin: b.dataset.close}); }

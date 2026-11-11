@@ -262,3 +262,17 @@ print("stable trait tests pass")
 
 assert predict_for_trader({**pm, "use_personal": False}, {"trader": "A", "range": "chasing"})[0] == predict(pm, {"trader": "A", "range": "chasing"})[0]
 print("personal-or-pooled tests pass")
+
+# your own price on a stock buy: a limit order for that many shares
+import copier as cp2, tempfile as _tf4, pathlib as _pl4
+cp2.SOURCES_FILE = _pl4.Path(_tf4.mkdtemp()) / "sources.json"
+sent = []
+cp2.alpaca = lambda m, p, b=None: (200, {})
+cp2.place = lambda m, p, b=None: (sent.append(b), (200, {"id": "x"}))[1]
+it = {"trade": {"Ticker": "DDOG", "Transaction": "Purchase", "AssetType": "ST", "Representative": "A"}}
+msg = cp2.decide_pelosi(it, limit=180.5, qty=3)
+assert sent[-1] == {"symbol": "DDOG", "qty": "3", "side": "buy", "type": "limit", "limit_price": "180.50", "time_in_force": "day"}, sent
+assert "Limit buy 3 DDOG at $180.50 ($541.50)" in msg, msg
+cp2.decide_pelosi(it)
+assert sent[-1]["type"] == "market"                                          # no price given: as before
+print("stock limit order tests pass")

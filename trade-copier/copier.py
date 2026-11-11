@@ -406,10 +406,16 @@ def check_pelosi(pending, log):
         f.writelines(json.dumps(e) + "\n" for e in events)
 
 
-def decide_pelosi(item, auto=False, stake=1):
-    """Place the approved order (auto=True: autopilot's own; stake multiplies a buy's size). Returns a short message."""
+def decide_pelosi(item, auto=False, stake=1, limit=None, qty=None):
+    """Place the approved order (auto=True: autopilot's own; stake multiplies a buy's size). limit + qty: buy that many
+    shares at your price or better (a limit order, good for the day). Returns a short message."""
     load_env()
     desc, action = plan_order(item["trade"], float(os.environ.get("DOLLARS_PER_TRADE", "1000")) * stake)
+    if limit and action and action[0] == "POST":
+        sym = action[2]["symbol"]
+        desc = f"Limit buy {qty:g} {sym} at ${limit:,.2f} (${limit * qty:,.2f}), good for today"
+        action = ("POST", "/v2/orders", {"symbol": sym, "qty": f"{qty:g}", "side": "buy", "type": "limit",
+                                         "limit_price": f"{limit:.2f}" if limit >= 1 else f"{limit:.4f}", "time_in_force": "day"})
     if action[0] == "POST" and alpaca("GET", f"/v2/assets/{action[2]['symbol']}")[0] != 200:
         return f"Alpaca can't trade {action[2]['symbol']}, skipped"
     st, r = place(*action)
