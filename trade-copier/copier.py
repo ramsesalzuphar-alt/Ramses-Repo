@@ -356,7 +356,7 @@ def check_pelosi(pending, log):
     today = date.today().isoformat()
     try:  # prices for the trend-before-filing feature, all symbols in one go
         closes = daily_closes({t["Ticker"] for t in trades if t["Ticker"]} | {"SPY"} | GLOBAL_SYMBOLS,
-                              (date.today() - timedelta(days=45)).isoformat(), today) if trades and model else {}
+                              (date.today() - timedelta(days=120)).isoformat(), today) if trades and model else {}  # 120d: reaches late filers' trade days
     except Exception:
         closes = {}
     events = []
@@ -388,7 +388,11 @@ def check_pelosi(pending, log):
         events.append({"t": int(datetime.now().timestamp() * 1000), "day": today, "rep": name, "sym": sym,
                        "kind": t["Transaction"], "score": score if model else None})
         lvl, label = urgency(t)
+        bars = closes.get(sym) or []
+        traded = datetime.strptime(t["TransactionDate"], "%m/%d/%Y").date().isoformat()
+        theirs = [c for d, c in bars if d <= traded]  # their price: the close on (or just before) the day they traded
         pending.append({"id": "p:" + k, "kind": "pelosi", "trade": t, "label": desc,
+                        "entry_px": theirs[-1] if theirs else None, "price_now": bars[-1][1] if bars else None,
                         "side": "buy" if action[0] == "POST" else "sell",
                         "title": f"{name} {t['Transaction'].lower()} {sym}",
                         "detail": "Alpaca paper",

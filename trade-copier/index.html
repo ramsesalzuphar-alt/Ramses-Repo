@@ -208,7 +208,7 @@ function ago(ts) {
 function timing(p) {
   const rows = [];
   if (p.kind === "pelosi") {
-    if (p.entered_at) rows.push(["They traded", day(p.entered_at), p.entered_at]);
+    if (p.entered_at) rows.push(["They traded", day(p.entered_at) + (p.entry_px ? ` around $${price(p.entry_px)}` : ""), p.entered_at]);
     if (p.filed_at) rows.push(["Filed publicly", day(p.filed_at), p.filed_at]);
   } else if (p.entered_at) {
     rows.push(["Trader entered", clock(p.entered_at) + (p.entry_px ? ` at $${price(p.entry_px)}` : ""), p.entered_at]);
@@ -218,7 +218,7 @@ function timing(p) {
   let html = rows.map(([k, v, ts]) => `<div class="trow"><span>${k}</span><span><b>${esc(v)}</b> <span class="ago" data-ts="${ts}"></span></span></div>`).join("");
   if (p.entry_px && p.price_now) {
     const mv = p.price_now / p.entry_px - 1;
-    const worse = p.side === "long" ? mv > 0 : mv < 0;  // the move already happened in their favor
+    const worse = p.side === "long" || p.side === "buy" ? mv > 0 : mv < 0;  // the move already happened in their favor
     html += `<div class="trow"><span>Price since</span><span>$${price(p.price_now)} (${mv >= 0 ? "+" : ""}${(mv * 100).toFixed(2)}%) ·
       <span class="${worse ? "late" : "up"}">you'd get a ${worse ? "worse" : "better"} price</span></span></div>`;
   }
