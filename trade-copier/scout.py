@@ -274,7 +274,9 @@ def run(log=print):
             cands = candidates()
             names = dict(cands)
             state["candidates"], state["error"] = len(names), None
-            last = lambda a: (t := state["traders"].get(a, {})).get("scanned", "") if t.get("v") == SCOUT_VERSION else ""
+            def last(a):
+                t = state["traders"].get(a, {})
+                return t.get("scanned", "") if t.get("v") == SCOUT_VERSION else ""
             todo = sorted(names, key=last)[:200]  # never scanned (or under older rules) first, then the oldest scan
             for i, addr in enumerate(todo, 1):
                 try:
@@ -296,6 +298,10 @@ def run(log=print):
             save(state)
         except Exception as e:
             state["error"] = str(e)
+            try:
+                save(state)  # so the page shows the scout is failing, instead of silently standing still
+            except OSError:
+                pass
             time.sleep(120)
 
 

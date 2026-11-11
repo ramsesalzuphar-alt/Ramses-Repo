@@ -153,3 +153,20 @@ cond = [(i, {**f(), "regime": "BTC 7d: with trade"} if i % 2 else f(), 0.01 if i
 r = scout.judge(cond)
 assert "BTC 7d: with trade" in [p["when"] for p in r["patterns"]], r["patterns"]
 print("condition pattern tests pass")
+
+# the main loop gets past ordering the traders and saves what it scanned (a bug here once stopped every scan)
+import scout as sc
+class Stop(BaseException): pass
+saved = []
+sc.load = lambda: {"traders": {"old": {"v": sc.SCOUT_VERSION, "scanned": "2020"}}, "candidates": 0}
+sc.candidates = lambda: [("new", "N"), ("old", "O")]
+sc.scan = lambda a, p: {"consistent": False, "patterns": [], "pages": 0}
+sc.time.sleep = lambda s: None
+def _save(s): saved.append(dict(s["traders"])); raise Stop
+sc.save = _save
+try:
+    sc.run(lambda m: None)
+except Stop:
+    pass
+assert saved and set(saved[0]) == {"new", "old"} and saved[0]["new"]["v"] == sc.SCOUT_VERSION, saved
+print("scout loop tests pass")
