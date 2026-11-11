@@ -1,7 +1,7 @@
 """Trade Copier app: one page with buttons for everything. Run: python app.py, then open http://127.0.0.1:8765
 Checks the top crypto traders every 5 minutes and every House member's trade filings every 30 (or when you press Check now).
 New trades wait for your Copy/Skip; exits of copied trades happen automatically. Paper money only.
-Relearns daily. Each market (crypto, stocks) has its own autopilot that copies STRONG trades by itself; it only unlocks
+Relearns every 6 hours. Each market (crypto, stocks) has its own autopilot that copies STRONG trades by itself; it only unlocks
 once that market's live track record proves an edge, or runs as a paper experiment if you start it.
 """
 import json, os, threading, time, traceback
@@ -16,7 +16,7 @@ APP_FILE = HERE / "app_state.json"  # waiting proposals + activity log, so a res
 PORT, CHECK_EVERY, RETRY_AFTER = 8765, 5 * 60, 2 * 60  # crypto traders every 5 min; a failed check is retried after 2 min
 CONGRESS_EVERY = 30 * 60  # House filings change a few times a day: no need to download their index every 5 min
 last_congress = 0.0
-RETRAIN_EVERY, AUTO_MAX_PER_CHECK = 24 * 3600, 5
+RETRAIN_EVERY, AUTO_MAX_PER_CHECK = 6 * 3600, 5  # relearn 4x a day: new graded trades reach the model and the unlock test sooner
 EXPIRE_AFTER = 10 * 60  # seconds a crypto trade waits for you
 MARKETS = ("crypto", "stocks")
 # loss guard: last 10 autopilot trades losing more than ~1% each on average -> pause + relearn ($100 crypto, $1000 stock copies)
