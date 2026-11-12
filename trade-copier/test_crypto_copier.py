@@ -194,3 +194,16 @@ L["orders"]["BTC"] = {**{"side": "long", "limit": 1, "qty": 1, "source": "0xabc"
 cc.save_ledger(L)
 assert cc.close_manual("BTC") == "Cancelled your BTC order" and "BTC" not in cc.load_ledger()["orders"]
 print("your-price order tests pass")
+
+# trader gate: needs 20+ graded copies; losing -> dropped, +0.5%+ avg -> boosted
+import crypto_copier as _cc, learn as _ln
+assert _cc.track_gate(None) is None and _cc.track_gate({"n": 19, "avg": -0.05, "win": 0.1}) is None
+assert _cc.track_gate({"n": 20, "avg": -0.0001, "win": 0.5}) == "drop"
+assert _cc.track_gate({"n": 20, "avg": 0.004, "win": 0.6}) is None and _cc.track_gate({"n": 20, "avg": 0.005, "win": 0.6}) == "boost"
+H = _ln.H
+_closes = {"X": {i * H: 100 + i for i in range(60)}}  # rising every hour
+_ev = [{"addr": "A", "coin": "X", "side": "long", "t": 30 * H}, {"addr": "B", "coin": "X", "side": "short", "t": 30 * H},
+       {"addr": "B", "coin": "Y", "side": "long", "t": 30 * H}]  # no prices for Y: not graded
+_r = _ln.trader_records(_closes, _ev)
+assert set(_r) == {"A", "B"} and _r["A"]["n"] == 1 and _r["A"]["win"] == 1 and _r["A"]["avg"] > 0 > _r["B"]["avg"], _r
+print("trader gate tests pass")

@@ -315,13 +315,25 @@ def live_stock_record():
 def live_record():
     """Grade every trade the app scored with a learned model, once 24h (+ a little) have passed."""
     now = int(time.time() * 1000)
-    ready = [e for e in logged_events() if e.get("score") is not None and e["t"] < now - 26 * H]
-    if not ready:
+    seen = [e for e in logged_events() if e["t"] < now - 26 * H]
+    ready = [e for e in seen if e.get("score") is not None]
+    if not seen:
         return {"graded": 0, "n_high": 0, "n_low": 0, "high": "none yet", "low": "none yet", "edge": False}
-    closes = hourly_closes({e["coin"] for e in ready}, min(e["t"] for e in ready) - 26 * H, now)
+    closes = hourly_closes({e["coin"] for e in seen}, min(e["t"] for e in seen) - 26 * H, now)
     graded = [(e["score"], res[1]) for e in ready if (res := copy_result(closes, e["coin"], e["t"], e["side"]))]
     hi, lo = [r for s, r in graded if s >= STRONG], [r for s, r in graded if s < WEAK]
-    return {"graded": len(graded), "n_high": len(hi), "n_low": len(lo), "high": summ(hi), "low": summ(lo), "edge": has_edge(hi, lo)}
+    return {"graded": len(graded), "n_high": len(hi), "n_low": len(lo), "high": summ(hi), "low": summ(lo), "edge": has_edge(hi, lo),
+            "traders": trader_records(closes, seen)}
+
+
+def trader_records(closes, events):
+    """{addr: {n, win, avg}} of copying each trader: every new position the app saw, graded like the backtest
+    (enter 30 min after, hold 24h, after fees). The copier stops proposing traders whose copies lose money."""
+    by = {}
+    for e in events:
+        if e.get("addr") and (res := copy_result(closes, e["coin"], e["t"], e["side"])):
+            by.setdefault(e["addr"], []).append(res[1])
+    return {a: {"n": len(r), "win": sum(x > 0 for x in r) / len(r), "avg": sum(r) / len(r)} for a, r in by.items()}
 
 
 def keep_on_error(fn, previous):

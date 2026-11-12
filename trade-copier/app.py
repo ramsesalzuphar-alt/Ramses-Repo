@@ -16,6 +16,7 @@ APP_FILE = HERE / "app_state.json"  # waiting proposals + activity log, so a res
 PORT, CHECK_EVERY, RETRY_AFTER = 8765, 5 * 60, 2 * 60  # crypto traders every 5 min; a failed check is retried after 2 min
 CONGRESS_EVERY = 30 * 60  # House filings change a few times a day: no need to download their index every 5 min
 last_congress = 0.0
+AUTO_MIN = 55  # autopilot copies trades scored 55+ (the live unlock test still judges STRONG, 60+)
 RETRAIN_EVERY, AUTO_MAX_PER_CHECK = 6 * 3600, 5  # relearn 4x a day: new graded trades reach the model and the unlock test sooner
 EXPIRE_AFTER = 10 * 60  # seconds a crypto trade waits for you
 MARKETS = ("crypto", "stocks")
@@ -218,7 +219,7 @@ def run_autopilot(m):
     if not (a["on"] and (a["forced"] or unlocked(m))):
         return
     mine = (lambda x: x["kind"] == "crypto") if m == "crypto" else (lambda x: x["kind"] == "pelosi" and x["side"] == "buy")
-    strong = sorted((x for x in S["pending"] if mine(x) and x["score"] >= learn.STRONG), key=lambda x: -x["score"])
+    strong = sorted((x for x in S["pending"] if mine(x) and x["score"] >= AUTO_MIN), key=lambda x: -x["score"])
     x = stake(m)
     for item in strong[:AUTO_MAX_PER_CHECK]:
         S["pending"].remove(item)
@@ -422,8 +423,8 @@ def set_autopilot(on, force=False, m="crypto"):
                     "Use Run experiment to try it anyway.")
         a.update(on=on, forced=bool(on and not unlocked(m)), guard_since=datetime.now().isoformat(timespec="seconds"),
                  guard_trips=[], resume=False)
-        what = ("copies STRONG crypto trades by expected profit" if m == "crypto"
-                else "buys STRONG congressional trades by expected profit")
+        what = (f"copies crypto trades scored {AUTO_MIN}+ by expected profit" if m == "crypto"
+                else f"buys congressional trades scored {AUTO_MIN}+ by expected profit")
         log(f"{m.title()} autopilot OFF" if not on else
             f"{m.title()} autopilot ON{' as an EXPERIMENT (model not proven yet)' if a['forced'] else ''}: {what}, "
             f"max {AUTO_MAX_PER_CHECK} per check, loss guard active (paper)")
@@ -497,6 +498,9 @@ if __name__ == "__main__":
         S["auto"][m] = auto_stats(m)
     graduation()
     publish()
+    if os.name == "nt":  # keep the PC from sleeping while the copier runs (the screen can still turn off); ends with the process
+        import ctypes
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
     threading.Thread(target=loop, daemon=True).start()
     threading.Thread(target=scout.run, args=(scout_log,), daemon=True).start()  # nonstop search for consistent traders
     print(f"Trade Copier running at http://127.0.0.1:{PORT}  (Ctrl+C to stop)")

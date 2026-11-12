@@ -309,12 +309,12 @@ def entry_times(addr):
 
 
 def rule_of(p):
-    """(take profit, stop loss, max hours) of a copy. Autopilot copies use the close rule the scout learned for their
-    trader, if it found a consistent one; otherwise the 3:1 default. Your own copies only take profit."""
-    if not p.get("auto"):
-        return TAKE_PROFIT, None, None
+    """(take profit, stop loss, max hours) of a copy. Every copy uses the close rule the scout learned for its trader,
+    if it found one that held up on copies it never saw. Otherwise: autopilot's 3:1 default; your own copies only take profit."""
     r = p.get("exit")
-    return (r.get("tp"), r.get("sl"), r.get("max_h")) if r else (TAKE_PROFIT, STOP_LOSS, None)
+    if r:
+        return r.get("tp"), r.get("sl"), r.get("max_h")
+    return (TAKE_PROFIT, STOP_LOSS, None) if p.get("auto") else (TAKE_PROFIT, None, None)
 
 
 def target_exits(ledger, mids, log):
@@ -334,7 +334,7 @@ def target_exits(ledger, mids, log):
 
 def rule_text(p):
     tp, sl, mh = rule_of(p)
-    learned = (p.get("exit") or {}).get("name") if p.get("auto") else None
+    learned = (p.get("exit") or {}).get("name")
     return "follow trader" + "".join(x for x in (tp and f" · TP {tp:.1%}", sl and f" · SL {sl:.1%}", mh and f" · max {mh}h") if x) + (
         " (learned)" if learned else "")
 
@@ -379,6 +379,7 @@ def check_crypto(pending, log):
             tops.append(a)
             names[a] = nm or short_addr(a)
     mids, stats, model = hl({"type": "allMids"}), market_stats(), load_model("crypto")
+    track = (load_model("live") or {}).get("traders", {})  # each trader's graded copies, from learn.py
     copied = {p["source"] for p in ledger["positions"].values() if p.get("source")}
     full = {a: positions_full(a) for a in set(tops) | copied}  # keep watching traders you copied, even off the top list
     new = {a: {c: side for c, (side, _) in f.items()} for a, f in full.items()}
@@ -448,6 +449,12 @@ def check_crypto(pending, log):
                                 "score": score if learned else None}) + "\n")
             if coin in ledger["positions"] or (addr, coin) in waiting or coin not in mids:
                 continue
+            rec, gate = track.get(addr), track_gate(track.get(addr))
+            if gate == "drop":
+                continue  # their copies have lost money: still logged and graded above (so they can earn their way back), never proposed
+            if learned and gate == "boost":
+                score = min(100, score + TRACK_BONUS)
+                why.insert(0, f"copies of this trader made {rec['avg']:+.2%} avg ({rec['win']:.0%} won, n={rec['n']}): +{TRACK_BONUS}")
             pending.append({"id": f"c:{addr}:{coin}:{side}", "kind": "crypto", "addr": addr, "coin": coin, "side": side,
                             "label": f"{side.title()} ${dollars:.0f} of {coin}",
                             "title": f"{names[addr]} opened {side} {coin}",
@@ -463,6 +470,16 @@ def check_crypto(pending, log):
     save_ledger(ledger)
     return [{"name": names[a], "pnl": pnl, "longs": sum(s == "long" for s in new[a].values()),
              "shorts": sum(s == "short" for s in new[a].values())} for pnl, a, _ in top]
+
+
+TRACK_MIN, TRACK_BONUS_AVG, TRACK_BONUS = 20, 0.005, 5  # trader gate: 20+ graded copies; losing -> not proposed; +0.5% avg -> +5 score
+
+
+def track_gate(rec):
+    """'drop' a trader whose 20+ graded copies lost money on average, 'boost' one whose made +0.5%+, else None."""
+    if not rec or rec["n"] < TRACK_MIN:
+        return None
+    return "drop" if rec["avg"] < 0 else "boost" if rec["avg"] >= TRACK_BONUS_AVG else None
 
 
 ORDER_HOURS = 24  # an unfilled price order is cancelled after this
@@ -497,7 +514,7 @@ def decide_crypto(item, auto=False, stake=1, limit=None, qty=None):
                 f"Fills when the price gets there, cancelled after {ORDER_HOURS}h")
     if limit:  # already at or past your price: you get it now, at the market price (yours or better)
         dollars = px * qty
-    rule = scout_exit(item["addr"]) if auto else None  # autopilot closes each trader's copies by that trader's learned rule
+    rule = scout_exit(item["addr"])  # each copy closes by its trader's learned rule, if the scout found one
     open_pos(ledger, coin, side, dollars, px, item["addr"], item.get("feats"), auto, rule)
     save_ledger(ledger)
     return f"Copied: {side} ${dollars:,.2f} of {coin} at ${px:,.6g}" + (f" · close rule: {rule['name']}" if rule else "")
@@ -518,7 +535,7 @@ def fill_orders(ledger, mids, log):
             if coin in ledger["positions"] or ledger["cash"] < dollars * (1 + FEE):
                 log(f"Cancelled {o['side']} order for {coin}: " + ("you already hold it" if coin in ledger["positions"] else "not enough paper cash"))
                 continue
-            open_pos(ledger, coin, o["side"], dollars, o["limit"], o["source"], o.get("feats"))
+            open_pos(ledger, coin, o["side"], dollars, o["limit"], o["source"], o.get("feats"), False, scout_exit(o["source"]))
             log(f"Order filled: {o['side']} {o['qty']:.6g} {coin} at ${o['limit']:,.6g} (${dollars:,.2f})")
 
 

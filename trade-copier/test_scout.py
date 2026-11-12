@@ -74,7 +74,8 @@ print("close rule tests pass")
 from datetime import datetime, timedelta
 p = {"auto": True, "exit": {"name": "x", "tp": 0.03, "sl": 0.01}}
 assert cc.rule_of(p) == (0.03, 0.01, None) and cc.rule_of({"auto": True}) == (cc.TAKE_PROFIT, cc.STOP_LOSS, None)
-assert cc.rule_of({"auto": False, "exit": p["exit"]}) == (cc.TAKE_PROFIT, None, None)
+assert cc.rule_of({"auto": False, "exit": p["exit"]}) == (0.03, 0.01, None)   # your copies use the learned rule too
+assert cc.rule_of({"auto": False}) == (cc.TAKE_PROFIT, None, None)
 L = {"cash": 1000, "positions": {}, "history": []}
 cc.open_pos(L, "A", "long", 100, 100, "x", auto=True, exit={"name": "follow trader"})            # no TP/SL: stays at -5%
 cc.open_pos(L, "B", "long", 100, 100, "x", auto=True, exit={"name": "h", "max_h": 2})
@@ -132,7 +133,10 @@ msg = cc.decide_crypto({"coin": "ETH", "side": "long", "addr": "T"}, auto=True)
 assert "close rule: their habit" in msg and L["positions"]["ETH"]["exit"]["tp"] == 0.04, msg
 msgs = []; cc.target_exits(L, {"ETH": "104.5"}, msgs.append)
 assert "Take profit" in msgs[0] and not L["positions"], msgs     # +4.5% closes under ITS rule (the default needs +6%)
-cc.decide_crypto({"coin": "ETH", "side": "long", "addr": "T"})    # your own copy: no learned rule
+cc.decide_crypto({"coin": "ETH", "side": "long", "addr": "T"})    # your own copy: the same learned rule
+assert L["positions"]["ETH"]["exit"]["tp"] == 0.04
+del L["positions"]["ETH"]
+cc.decide_crypto({"coin": "ETH", "side": "long", "addr": "U"})    # a trader with no learned rule: none
 assert L["positions"]["ETH"]["exit"] is None
 print("end-to-end close rule tests pass")
 

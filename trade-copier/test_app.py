@@ -33,8 +33,8 @@ assert A["on"] and A["forced"] and "EXPERIMENT" in app.S["log"][0]["msg"]
 assert not app.ap("stocks")["on"]   # markets are independent
 
 # copies only STRONG crypto, most profitable first, max 5, marked as autopilot trades
-app.S["pending"] = [{"kind": "crypto", "coin": f"C{i}", "title": f"C{i}", "score": 61 + i} for i in range(7)] + \
-                   [{"kind": "crypto", "coin": "WEAK1", "title": "WEAK1", "score": 40},
+app.S["pending"] = [{"kind": "crypto", "coin": f"C{i}", "title": f"C{i}", "score": 55 + i} for i in range(7)] + \
+                   [{"kind": "crypto", "coin": "WEAK1", "title": "WEAK1", "score": 54},
                     {"kind": "pelosi", "coin": "NVDA", "title": "NVDA", "side": "buy", "score": 90}]
 app.run_autopilot("crypto")
 assert copied == [(f"C{i}", True) for i in (6, 5, 4, 3, 2)], copied
@@ -76,7 +76,7 @@ B = app.ap("stocks")
 assert "locked" in app.set_autopilot(True, m="stocks")
 app.set_autopilot(True, force=True, m="stocks"); assert B["on"] and B["forced"]
 app.S["pending"] = [{"kind": "pelosi", "title": "BUY1", "side": "buy", "score": 70}, {"kind": "pelosi", "title": "BUY2", "side": "buy", "score": 80},
-                    {"kind": "pelosi", "title": "SELL", "side": "sell", "score": 95}, {"kind": "pelosi", "title": "MEH", "side": "buy", "score": 50},
+                    {"kind": "pelosi", "title": "SELL", "side": "sell", "score": 95}, {"kind": "pelosi", "title": "MEH", "side": "buy", "score": 54},
                     {"kind": "crypto", "coin": "X", "title": "X", "score": 99}]
 copied.clear(); A["on"] = False
 app.run_autopilot("stocks")
