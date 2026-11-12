@@ -383,7 +383,8 @@ def trader_records(closes, events):
     for e in events:
         if e.get("addr") and (res := copy_result(closes, e["coin"], e["t"], e["side"])):
             by.setdefault(e["addr"], []).append(res[1])
-    return {a: {"n": len(r), "win": sum(x > 0 for x in r) / len(r), "avg": sum(r) / len(r)} for a, r in by.items()}
+    return {a: {"n": len(r), "win": sum(x > 0 for x in r) / len(r), "avg": sum(r) / len(r), "sd": statistics.pstdev(r)}
+            for a, r in by.items()}
 
 
 def keep_on_error(fn, previous):

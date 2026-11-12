@@ -207,3 +207,8 @@ _ev = [{"addr": "A", "coin": "X", "side": "long", "t": 30 * H}, {"addr": "B", "c
 _r = _ln.trader_records(_closes, _ev)
 assert set(_r) == {"A", "B"} and _r["A"]["n"] == 1 and _r["A"]["win"] == 1 and _r["A"]["avg"] > 0 > _r["B"]["avg"], _r
 print("trader gate tests pass")
+# drop only when clearly losing: -0.1% over 500 copies with a 3% spread is break-even; -1% with a 1% spread is not
+assert _cc.track_gate({"n": 500, "avg": -0.001, "win": 0.48, "sd": 0.03}) is None
+assert _cc.track_gate({"n": 50, "avg": -0.01, "win": 0.3, "sd": 0.01}) == "drop"
+assert "sd" in _r["A"] and _r["A"]["sd"] == 0
+print("clear-loss gate tests pass")

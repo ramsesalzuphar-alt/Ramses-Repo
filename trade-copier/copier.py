@@ -66,10 +66,14 @@ TRACK_MIN, TRACK_BONUS_AVG, TRACK_BONUS = 20, 0.005, 5  # trader gate: 20+ grade
 
 
 def track_gate(rec):
-    """'drop' a trader whose 20+ graded copies lost money on average, 'boost' one whose made +0.5%+, else None."""
+    """'drop' a trader whose 20+ graded copies clearly lost money, 'boost' one whose made +0.5%+ on average, else None.
+    Clearly = even the top of the 95% range of their average is below zero (when the spread 'sd' is known): an average
+    of -0.1% over 500 noisy copies is break-even, and dropping it blocked the trades the model rated best."""
     if not rec or rec["n"] < TRACK_MIN:
         return None
-    return "drop" if rec["avg"] < 0 else "boost" if rec["avg"] >= TRACK_BONUS_AVG else None
+    if rec["avg"] < 0 and (rec.get("sd") is None or rec["avg"] + 1.96 * rec["sd"] / rec["n"] ** 0.5 < 0):
+        return "drop"
+    return "boost" if rec["avg"] >= TRACK_BONUS_AVG else None
 
 
 def member_gate(model, name, score, why, proven_only=True):
