@@ -385,11 +385,11 @@ function gradCard(s) {
   const tests = Object.keys(rows[0].checks);
   return ready + `<div class="scroll"><table><tr><th>Strategy</th><th class="r">Trades</th><th class="r">Days</th><th class="r">Avg</th><th class="r">Net</th>
       ${tests.map(t => `<th class="r">${esc(t)}</th>`).join("")}<th></th></tr>`
-    + rows.map(r => `<tr><td>${esc(r.name)}</td><td class="r">${r.n}</td><td class="r">${r.days}</td>
+    + rows.map(r => `<tr><td>${esc(r.name)}${r.open ? ` <span class="ago">· ${r.open} open</span>` : ""}</td><td class="r">${r.n}</td><td class="r">${r.days}</td>
         <td class="r ${r.avg > 0 ? "up" : "down"}">${(r.avg * 100).toFixed(2)}%</td><td class="r">${signed(r.net)}</td>
         ${tests.map(t => `<td class="r">${r.checks[t] ? '<span class="up">✓</span>' : '<span class="ago">–</span>'}</td>`).join("")}
         <td>${r.ok ? '<span class="pill STRONG">GRADUATED</span>' : ""}</td></tr>`).join("")
-    + `</table></div><div class="ago" style="margin-top:6px">To graduate, all five: ${tests.join(" · ")}. A strategy that later fails one loses its status, and you're told.</div>`;
+    + `</table></div><div class="ago" style="margin-top:6px">To graduate, all five: ${tests.join(" · ")}. A strategy that later fails one loses its status, and you're told. Practice strategies copy every crypto proposal by their own rule with $100 of practice money (no account money), so several versions build a record at once.</div>`;
 }
 
 function account(a, crypto) {

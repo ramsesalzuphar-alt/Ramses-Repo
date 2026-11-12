@@ -1,6 +1,7 @@
 """Autopilot per market: lock, experiment mode, profit-ranked copying, loss guard (pause -> relearn -> resume; 3 trips -> stop)."""
 import tempfile, pathlib, app, copier, crypto_copier
 app.APP_FILE = pathlib.Path(tempfile.mkdtemp()) / "state.json"   # never touch the running app's real state
+app.shadow.FILE = app.APP_FILE.with_name("shadow.json")           # nor its practice books
 copied, bought, retrains = [], [], []
 stakes = []
 crypto_copier.decide_crypto = lambda item, auto=False, stake=1: copied.append((item["coin"], auto)) or stakes.append(stake) or f"Copied {item['coin']}"
@@ -140,6 +141,7 @@ calls = {"congress": 0, "crypto": 0}
 copier.check_pelosi = lambda pending, log: calls.__setitem__("congress", calls["congress"] + 1)
 crypto_copier.check_crypto = lambda pending, log: calls.__setitem__("crypto", calls["crypto"] + 1) or []
 app.refresh_accounts = app.security_check = app.graduation = lambda: None
+app.practice = lambda *a, **k: None   # no network in tests (practice books: test_shadow.py)
 app.last_congress = 0.0
 assert app.run_check() == 5 * 60
 app.run_check()
@@ -169,12 +171,12 @@ assert app.skip_all("nope") == "Unknown market" and len(app.S["pending"]) == 1
 print("skip all tests pass")
 
 # after a relearn, waiting stock trades are re-scored by the new model (with the member's updated record)
-_m = {"base": [100, 0.0, 0.5], "features": {"trader": {"member X": [50, 0.02, 0.8]}}, "traders": {}, "records": {}}
+_m = {"base": [100, 0.0, 0.5], "features": {"trader": {"member X": [50, 0.02, 0.8]}}, "traders": {}, "records": {"X": [30, 20, 0.03]}}  # X: proven (copies beat the market)
 app.copier.load_model = lambda name: _m if name == "congress" else None
 app.S["pending"] = [{"kind": "pelosi", "trade": {"Representative": "X"}, "feats": {"trader": "member X"}, "score": 20},
                     {"kind": "crypto", "feats": {"trader": "trader y"}, "score": 20}]
 assert app.rescore() == 1 and app.S["pending"][0]["score"] > 50 and app.S["pending"][1]["score"] == 20, app.S["pending"]
-assert app.S["pending"][0]["feats"]["record"] == "record: under 20 known trades"
+assert app.S["pending"][0]["feats"]["record"] == "record: high win rate (55%+)"
 print("rescore tests pass")
 _m["records"] = {"Loser": [25, 5, -1.0]}
 app.S["pending"] = [{"kind": "pelosi", "trade": {"Representative": "Loser"}, "feats": {"trader": "member Loser"}, "score": 70}]

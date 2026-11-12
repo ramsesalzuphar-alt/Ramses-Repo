@@ -69,12 +69,13 @@ def track_gate(rec):
 
 
 def member_gate(model, name, score, why):
-    """The trader gate for a House member, from every copy of theirs graded so far: None = don't propose (their
-    copies lost vs the market), else the score (+5 and a reason in `why` for a member whose copies beat it by +0.5%+)."""
+    """Which members the stock bot proposes, like crypto's watched traders: only proven ones, whose 20+ graded copies
+    beat the market. None = don't propose (still logged and graded, so others can earn their way in); else the score
+    (+5 and a reason in `why` for a member whose copies beat it by +0.5%+)."""
     n, wins, total = (model.get("records") or {}).get(name) or (0, 0, 0.0)
     rec = {"n": n, "win": wins / n, "avg": total / n} if n else None
     gate = track_gate(rec)
-    if gate == "drop":
+    if gate == "drop" or not rec or rec["n"] < TRACK_MIN or rec["avg"] <= 0:
         return None
     if gate == "boost":
         why.insert(0, f"copies of {name} beat the market by {rec['avg']:+.2%} avg ({rec['win']:.0%} won, n={rec['n']}): +{TRACK_BONUS}")

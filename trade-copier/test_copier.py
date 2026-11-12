@@ -137,8 +137,8 @@ cp.load_model = lambda name: _m
 cp.daily_closes = lambda *a, **k: {}
 pending.clear(); cp.check_pelosi(pending, logs.append)
 got = {p["trade"]["Ticker"]: p for p in pending}
-assert "AAA" not in got and {"BBB", "CCC"} <= set(got), list(got)   # Ann dropped; Cy has too few copies to judge
-assert got["BBB"]["score"] == got["CCC"]["score"] + 5 and "beat the market by +2.00%" in got["BBB"]["why"][0], got["BBB"]["why"]
+assert set(got) == {"BBB"}, list(got)   # Ann's copies lost; Cy has too few to be proven: only proven members are proposed
+assert "beat the market by +2.00%" in got["BBB"]["why"][0] and "Cy Mid" in cp.STOCK_EVENTS.read_text(), got["BBB"]["why"]
 assert "Ann Small" in cp.STOCK_EVENTS.read_text()   # still logged, so she can earn her way back
 cp.load_model = lambda name: None
 print("member gate tests pass")

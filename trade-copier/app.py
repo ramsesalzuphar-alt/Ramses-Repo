@@ -8,7 +8,7 @@ import json, os, threading, time, traceback
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import copier, crypto_copier, learn, scout
+import copier, crypto_copier, learn, scout, shadow
 copier.load_env()  # .env settings (trade sizes) before the first page load
 
 HERE = Path(__file__).parent
@@ -99,6 +99,8 @@ def graduation():
             if who(h):
                 by.setdefault(who(h), []).append(h)
         rows += [{"name": f"{m.title()}: copy {k}", "market": m, **grade(v)} for k, v in by.items() if len(v) >= 10]
+    rows += [{"name": f"Practice: {k}", "market": "crypto", "open": n_open, **grade(closed)}
+             for k, (closed, n_open) in shadow.trades().items()]  # practice strategies, graded the same way
     now = {r["name"] for r in rows if r["ok"]}
     for name in sorted(now - set(S["graduates"])):
         log(f"GRADUATED: '{name}' passed every test on its paper trades. It's a candidate for real money; "
@@ -106,7 +108,7 @@ def graduation():
     for name in sorted(set(S["graduates"]) - now):
         log(f"'{name}' lost its graduation: its recent paper trades no longer pass every test.")
     S["graduates"] = sorted(now)
-    S["grad"] = sorted(rows, key=lambda r: (-r["ok"], -sum(r["checks"].values()), -r["n"]))[:12]
+    S["grad"] = sorted(rows, key=lambda r: (-r["ok"], -sum(r["checks"].values()), -r["n"]))[:16]
 
 
 def stake(m):
@@ -336,7 +338,9 @@ def run_check():
             if time.time() - last_congress >= CONGRESS_EVERY:
                 copier.check_pelosi(S["pending"], log)
                 last_congress = time.time()
+            ids = {id(x) for x in S["pending"]}
             S["traders"] = crypto_copier.check_crypto(S["pending"], log)
+            practice([x for x in S["pending"] if x.get("kind") == "crypto" and id(x) not in ids], full=True)
             for m in MARKETS:
                 guard(m)  # judge the trades that just closed before opening new ones
                 run_autopilot(m)
@@ -388,8 +392,21 @@ def loop_once():
                     guard(name)
                 except Exception:
                     traceback.print_exc()  # a failed quick check is retried next minute; the full check also catches exits
+            practice()
             refresh_accounts()
             publish()
+
+
+def practice(new=(), full=False):
+    """Practice strategies: take the new crypto proposals, close what hit its rule. full = after a full check, when
+    the watched traders' positions are fresh, so 'trader exited' can be judged. Never breaks the real checks."""
+    try:
+        if new:
+            shadow.open_new(new, {a for a, _, _ in crypto_copier.watchlist()})
+        holdings = json.loads(crypto_copier.STATE_FILE.read_text()) if full and crypto_copier.STATE_FILE.exists() else None
+        shadow.update(crypto_copier.hl({"type": "allMids"}), holdings)
+    except Exception:
+        traceback.print_exc()
 
 
 def num(x):
