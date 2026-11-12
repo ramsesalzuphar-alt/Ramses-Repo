@@ -194,6 +194,9 @@ def retrain():
         S["training"] = False
         S["model"] = model_summary()
         log(result)
+        n = rescore()
+        if n:
+            log(f"Rescored {n} waiting stock trade(s) with the relearned model")
         for m in MARKETS:
             a = ap(m)
             if a["on"] and not a["forced"] and not unlocked(m):
@@ -205,6 +208,27 @@ def retrain():
                     a["on"] = True
                     log(f"{m.title()} autopilot resumed with the relearned model")
         publish()
+
+
+def rescore():
+    """Re-score the waiting stock trades with the model just learned (crypto ones expire within 10 minutes anyway);
+    drop those of members whose copies have lost."""
+    m = copier.load_model("congress")
+    if not m:
+        return 0
+    n = 0
+    for x in list(S["pending"]):
+        if x["kind"] == "pelosi" and x.get("feats"):
+            x["feats"].update(copier.record_feature((m.get("records") or {}).get(x["trade"]["Representative"])))
+            score, why = copier.predict_for_trader(m, x["feats"])
+            score = copier.member_gate(m, x["trade"]["Representative"], score, why)
+            if score is None:
+                S["pending"].remove(x)
+                continue
+            x["score"], x["why"] = score, why
+            x["win"], x["verdict"] = copier.win_chance(m, x["feats"]), copier.verdict(x["score"], 60)
+            n += 1
+    return n
 
 
 def retrain_due():
@@ -400,6 +424,18 @@ def decide(item_id, approve, limit=None, qty=None):
         return msg
 
 
+def skip_all(market):
+    """Skip every trade waiting in one market (crypto or stocks)."""
+    if market not in MARKETS:
+        return "Unknown market"
+    with lock:
+        mine = [x for x in S["pending"] if (x["kind"] == "crypto") == (market == "crypto")]
+        S["pending"] = [x for x in S["pending"] if x not in mine]
+        log(f"Skipped all {len(mine)} waiting {market} trade(s)")
+        publish()
+        return f"Skipped {len(mine)} trade(s)"
+
+
 def close(coin):
     with lock:
         try:
@@ -459,6 +495,8 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
         if self.path == "/api/decide":
             msg = decide(str(body.get("id")), bool(body.get("approve")), body.get("limit"), body.get("qty"))
+        elif self.path == "/api/skip_all":
+            msg = skip_all(str(body.get("market")))
         elif self.path == "/api/close":
             msg = close(str(body.get("coin")))
         elif self.path == "/api/check":
@@ -492,6 +530,7 @@ if __name__ == "__main__":
     if sys.stderr is None:  # started windowless (pythonw, at login): keep error traces in a file instead of losing them
         sys.stderr = sys.stdout = open(HERE / "app_errors.log", "a", buffering=1, encoding="utf-8")
     S["model"] = model_summary()
+    rescore()  # the model may have been relearned while the app was stopped
     for m in MARKETS:
         if ap(m)["on"] and not ap(m)["forced"] and not unlocked(m):
             ap(m)["on"] = False  # never resume autopilot on an unproven model unless the user started it as an experiment

@@ -161,3 +161,22 @@ app.S["pending"] = [{"kind": "crypto", "coin": "V", "title": "V", "score": 90, "
 stakes.clear(); app.run_autopilot("crypto")
 assert stakes == [4], stakes                             # ... x2 confidence would be x6: capped at x4
 print("win-chance sizing tests pass")
+
+# skip all: one market's waiting trades only
+app.S["pending"] = [{"kind": "crypto", "title": "a"}, {"kind": "pelosi", "title": "b"}, {"kind": "crypto", "title": "c"}]
+assert app.skip_all("crypto") == "Skipped 2 trade(s)" and app.S["pending"] == [{"kind": "pelosi", "title": "b"}]
+assert app.skip_all("nope") == "Unknown market" and len(app.S["pending"]) == 1
+print("skip all tests pass")
+
+# after a relearn, waiting stock trades are re-scored by the new model (with the member's updated record)
+_m = {"base": [100, 0.0, 0.5], "features": {"trader": {"member X": [50, 0.02, 0.8]}}, "traders": {}, "records": {}}
+app.copier.load_model = lambda name: _m if name == "congress" else None
+app.S["pending"] = [{"kind": "pelosi", "trade": {"Representative": "X"}, "feats": {"trader": "member X"}, "score": 20},
+                    {"kind": "crypto", "feats": {"trader": "trader y"}, "score": 20}]
+assert app.rescore() == 1 and app.S["pending"][0]["score"] > 50 and app.S["pending"][1]["score"] == 20, app.S["pending"]
+assert app.S["pending"][0]["feats"]["record"] == "record: under 20 known trades"
+print("rescore tests pass")
+_m["records"] = {"Loser": [25, 5, -1.0]}
+app.S["pending"] = [{"kind": "pelosi", "trade": {"Representative": "Loser"}, "feats": {"trader": "member Loser"}, "score": 70}]
+assert app.rescore() == 0 and app.S["pending"] == []   # a member whose copies lost is dropped from the waiting list
+print("rescore gate tests pass")

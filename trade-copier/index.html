@@ -118,7 +118,8 @@
 
   <div data-tab="crypto">
     <section>
-      <h2>Waiting for you <span class="sub">newest first · crypto trades disappear after 10 minutes</span></h2>
+      <h2>Waiting for you <span class="sub">newest first · crypto trades disappear after 10 minutes</span>
+        <button class="small" id="skipall-crypto" data-skipall="crypto" hidden>Skip all</button></h2>
       <div id="pending-crypto" class="grid"></div>
     </section>
     <section class="card">
@@ -138,7 +139,8 @@
 
   <div data-tab="stocks" hidden>
     <section>
-      <h2>Waiting for you <span class="sub">every House member's trades, newest filings first</span></h2>
+      <h2>Waiting for you <span class="sub">every House member's trades, newest filings first</span>
+        <button class="small" id="skipall-stocks" data-skipall="stocks" hidden>Skip all</button></h2>
       <div id="pending-stocks" class="grid"></div>
     </section>
     <section class="card">
@@ -435,6 +437,9 @@ function render(s) {
     const mine = s.pending.filter(p => (p.kind === "crypto") === (mk === "crypto"))
                           .sort((a, b) => when(b) - when(a));  // newest first
     $("count-" + mk).textContent = mine.length;
+    const sk = $("skipall-" + mk);
+    sk.hidden = !mine.length; sk.disabled = s.checking;
+    if (armed !== "skipall:" + mk) sk.textContent = "Skip all";
     set("pending-" + mk, mine.length ? mine.map(card).join("") : `<div class="card empty">Nothing waiting. New trades show up here.</div>`);
     $("pending-" + mk).querySelectorAll("[data-act]").forEach(b => b.disabled = s.checking);
     set("model-" + mk, modelCard(s, mk));
@@ -489,6 +494,13 @@ document.addEventListener("click", e => {
     clearTimeout(armTimer);
     if (armed === b.dataset.close) { armed = null; b.disabled = true; post("/api/close", {coin: b.dataset.close}); }
     else { armed = b.dataset.close; armTimer = setTimeout(() => { armed = null; load(); }, 4000); load(); }
+  }
+  else if (b.dataset.skipall) {  // two clicks, like Close: skipped trades don't come back
+    clearTimeout(armTimer);
+    const key = "skipall:" + b.dataset.skipall;
+    if (armed === key) { armed = null; b.disabled = true; post("/api/skip_all", {market: b.dataset.skipall}); }
+    else { armed = key; b.textContent = `Click again to skip all ${$("count-" + b.dataset.skipall).textContent}`;
+           armTimer = setTimeout(() => { armed = null; load(); }, 4000); }
   }
   else if (b.id === "check") { b.disabled = true; post("/api/check"); }
   else if (b.dataset.auto) { b.disabled = true; post("/api/autopilot", {on: b.dataset.auto === "on", force: b.dataset.force === "1", market: b.dataset.market}); }

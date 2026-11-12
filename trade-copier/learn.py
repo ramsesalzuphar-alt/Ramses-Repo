@@ -12,7 +12,7 @@ Run: python learn.py   (the app also runs it daily; takes ~10 min)
 from http.client import HTTPException
 import json, os, statistics, sys, time
 from datetime import date, datetime, timedelta, timezone
-from copier import (http, load_env, fetch_trades, stock_features, record_feature, predict, predict_for_trader, daily_closes, stock_history,
+from copier import (SCORING, http, load_env, fetch_trades, stock_features, record_feature, predict, predict_for_trader, daily_closes, stock_history,
                     global_features, GLOBAL_SYMBOLS,
                     MODEL_FILE, CONGRESS_CACHE, STOCK_EVENTS)
 from crypto_copier import (top_traders, crypto_features, is_new_position, candles_5m, minute_features, load_ledger,
@@ -299,7 +299,8 @@ def top_patterns(m, k=20, n=8):
 def live_stock_record():
     """Grade every congressional trade the app scored, once a month of trading has passed."""
     events = [json.loads(l) for l in STOCK_EVENTS.read_text().splitlines() if l.strip()] if STOCK_EVENTS.exists() else []
-    ready = [e for e in events if e.get("score") is not None and e["day"] < (date.today() - timedelta(days=35)).isoformat()]
+    ready = [e for e in events if e.get("score") is not None and e.get("v") == SCORING
+             and e["day"] < (date.today() - timedelta(days=35)).isoformat()]
     if not ready:
         return {"graded": 0, "n_high": 0, "n_low": 0, "high": "none yet", "low": "none yet", "edge": False}
     bars = daily_closes({e["sym"] for e in ready} | {"SPY"}, min(e["day"] for e in ready),
@@ -316,7 +317,7 @@ def live_record():
     """Grade every trade the app scored with a learned model, once 24h (+ a little) have passed."""
     now = int(time.time() * 1000)
     seen = [e for e in logged_events() if e["t"] < now - 26 * H]
-    ready = [e for e in seen if e.get("score") is not None]
+    ready = [e for e in seen if e.get("score") is not None and e.get("v") == SCORING]  # older scoring methods don't count
     if not seen:
         return {"graded": 0, "n_high": 0, "n_low": 0, "high": "none yet", "low": "none yet", "edge": False}
     closes = hourly_closes({e["coin"] for e in seen}, min(e["t"] for e in seen) - 26 * H, now)

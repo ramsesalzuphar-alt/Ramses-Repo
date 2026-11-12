@@ -8,7 +8,7 @@ import json, os, statistics, time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from copier import load_env, http, load_model, predict_for_trader, win_chance, verdict, daily_closes, global_features, GLOBAL_SYMBOLS
+from copier import SCORING, TRACK_BONUS, track_gate, load_env, http, load_model, predict_for_trader, win_chance, verdict, daily_closes, global_features, GLOBAL_SYMBOLS
 
 HERE = Path(__file__).parent
 STATE_FILE = HERE / "crypto_state.json"
@@ -446,7 +446,7 @@ def check_crypto(pending, log):
                 win = None
             # every new position is logged with its learned score, copied or not, so learn.py can grade it 24h later
             f.write(json.dumps({"t": now_ms, "addr": addr, "coin": coin, "side": side, "entered_at": when,
-                                "score": score if learned else None}) + "\n")
+                                "score": score if learned else None, "v": SCORING}) + "\n")
             if coin in ledger["positions"] or (addr, coin) in waiting or coin not in mids:
                 continue
             rec, gate = track.get(addr), track_gate(track.get(addr))
@@ -470,16 +470,6 @@ def check_crypto(pending, log):
     save_ledger(ledger)
     return [{"name": names[a], "pnl": pnl, "longs": sum(s == "long" for s in new[a].values()),
              "shorts": sum(s == "short" for s in new[a].values())} for pnl, a, _ in top]
-
-
-TRACK_MIN, TRACK_BONUS_AVG, TRACK_BONUS = 20, 0.005, 5  # trader gate: 20+ graded copies; losing -> not proposed; +0.5% avg -> +5 score
-
-
-def track_gate(rec):
-    """'drop' a trader whose 20+ graded copies lost money on average, 'boost' one whose made +0.5%+, else None."""
-    if not rec or rec["n"] < TRACK_MIN:
-        return None
-    return "drop" if rec["avg"] < 0 else "boost" if rec["avg"] >= TRACK_BONUS_AVG else None
 
 
 ORDER_HOURS = 24  # an unfilled price order is cancelled after this

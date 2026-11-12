@@ -58,6 +58,33 @@ def get(url):
         return r.read()
 
 
+TRACK_MIN, TRACK_BONUS_AVG, TRACK_BONUS = 20, 0.005, 5  # trader gate: 20+ graded copies; losing -> not proposed; +0.5% avg -> +5 score
+
+
+def track_gate(rec):
+    """'drop' a trader whose 20+ graded copies lost money on average, 'boost' one whose made +0.5%+, else None."""
+    if not rec or rec["n"] < TRACK_MIN:
+        return None
+    return "drop" if rec["avg"] < 0 else "boost" if rec["avg"] >= TRACK_BONUS_AVG else None
+
+
+def member_gate(model, name, score, why):
+    """The trader gate for a House member, from every copy of theirs graded so far: None = don't propose (their
+    copies lost vs the market), else the score (+5 and a reason in `why` for a member whose copies beat it by +0.5%+)."""
+    n, wins, total = (model.get("records") or {}).get(name) or (0, 0, 0.0)
+    rec = {"n": n, "win": wins / n, "avg": total / n} if n else None
+    gate = track_gate(rec)
+    if gate == "drop":
+        return None
+    if gate == "boost":
+        why.insert(0, f"copies of {name} beat the market by {rec['avg']:+.2%} avg ({rec['win']:.0%} won, n={rec['n']}): +{TRACK_BONUS}")
+        return min(100, score + TRACK_BONUS)
+    return score
+
+
+SCORING = 2  # bump when HOW trades are scored changes: the live test judges only trades scored the current way
+
+
 def verdict(score, strong=70):
     """Learned scores are win chances, so callers pass strong=60."""
     return "STRONG" if score >= strong else "MIXED" if score >= 45 else "WEAK"
@@ -386,7 +413,9 @@ def check_pelosi(pending, log):
             why.append("rule-based: relearn to learn from every member's history")
             win = None
         events.append({"t": int(datetime.now().timestamp() * 1000), "day": today, "rep": name, "sym": sym,
-                       "kind": t["Transaction"], "score": score if model else None})
+                       "kind": t["Transaction"], "score": score if model else None, "v": SCORING})
+        if model and (score := member_gate(model, name, score, why)) is None:
+            continue  # copying this member has lost vs the market: still logged and graded, never proposed
         lvl, label = urgency(t)
         bars = closes.get(sym) or []
         traded = datetime.strptime(t["TransactionDate"], "%m/%d/%Y").date().isoformat()

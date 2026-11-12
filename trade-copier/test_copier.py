@@ -61,9 +61,11 @@ assert abs(learn.copy_result(closes, "BTC", t0, "short")[1] - (-0.10 - 2 * learn
 assert learn.copy_result(closes, "ETH", t0, "long") is None
 import time as _t
 old = int(_t.time() * 1000) - 30 * H
-learn.logged_events = lambda: [{"t": old, "coin": "BTC", "side": "long", "score": 70}] * 25 + \
-                              [{"t": old, "coin": "BTC", "side": "short", "score": 30}] * 25 + \
-                              [{"t": old, "coin": "BTC", "side": "long", "score": None}] * 50   # unscored: ignored
+V = learn.SCORING
+learn.logged_events = lambda: [{"t": old, "coin": "BTC", "side": "long", "score": 70, "v": V}] * 25 + \
+                              [{"t": old, "coin": "BTC", "side": "short", "score": 30, "v": V}] * 25 + \
+                              [{"t": old, "coin": "BTC", "side": "short", "score": 90}] * 40 + \
+                              [{"t": old, "coin": "BTC", "side": "long", "score": None}] * 50   # unscored, or scored the old way: ignored
 learn.hourly_closes = lambda coins, since, now: {"BTC": {old - H - old % H: 1, old - 25 * H - old % H: 1,
                                                          (old + H // 2) - (old + H // 2) % H: 100.0,
                                                          (old + H // 2 + 24 * H) - (old + H // 2 + 24 * H) % H: 105.0}}
@@ -126,6 +128,20 @@ assert "MINE" not in _json.loads(cp.SOURCES_FILE.read_text()) and any("Eve Sourc
 pending.clear(); cp.check_pelosi(pending, logs.append)
 assert pending == []   # seen: not proposed twice
 print("congress tests pass")
+
+# member gate: a member whose 20+ graded copies lost isn't proposed (but is still logged); a +0.5%+ one gets +5
+cp.SEEN_FILE.write_text("[]"); cp.STOCK_EVENTS.write_text("")
+_m = {"base": [100, 0.0, 0.5], "features": {}, "traders": {}, "use_personal": False,
+      "records": {"Ann Small": [30, 10, -0.6], "Bob Big": [30, 20, 0.6], "Cy Mid": [5, 0, -1.0]}}
+cp.load_model = lambda name: _m
+cp.daily_closes = lambda *a, **k: {}
+pending.clear(); cp.check_pelosi(pending, logs.append)
+got = {p["trade"]["Ticker"]: p for p in pending}
+assert "AAA" not in got and {"BBB", "CCC"} <= set(got), list(got)   # Ann dropped; Cy has too few copies to judge
+assert got["BBB"]["score"] == got["CCC"]["score"] + 5 and "beat the market by +2.00%" in got["BBB"]["why"][0], got["BBB"]["why"]
+assert "Ann Small" in cp.STOCK_EVENTS.read_text()   # still logged, so she can earn her way back
+cp.load_model = lambda name: None
+print("member gate tests pass")
 
 # trend before filing: stock vs SPY over 20 trading days, side-relative, only days before `day`
 days = [f"2026-10-{i:02d}" for i in range(1, 31)]
