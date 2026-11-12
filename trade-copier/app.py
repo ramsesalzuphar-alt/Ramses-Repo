@@ -245,7 +245,8 @@ def retrain_due():
         m = json.loads(copier.MODEL_FILE.read_text())
     except (OSError, json.JSONDecodeError):
         return None  # no model yet: learn everything
-    age = lambda n: time.time() - datetime.fromisoformat(m[n].get("trained") or m.get("trained") or "2000-01-01").timestamp() if m.get(n) else float("inf")
+    # a model without its own time counts as due: the file-wide time moves with every crypto relearn
+    age = lambda n: time.time() - datetime.fromisoformat(m[n]["trained"]).timestamp() if (m.get(n) or {}).get("trained") else float("inf")
     return tuple(n for names, every in RETRAIN_EVERY.items() if any(age(x) > every for x in names) for n in names)
 
 

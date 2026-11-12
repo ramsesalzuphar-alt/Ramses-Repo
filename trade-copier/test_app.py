@@ -200,3 +200,7 @@ assert app.retrain_due() == ("congress", "insiders")   # insiders never trained:
 app.S["training"] = True; assert app.retrain_due() == (); app.S["training"] = False
 _mf.unlink(); assert app.retrain_due() is None          # no model at all: learn everything
 print("relearn schedule tests pass")
+# a model kept from before per-model times (no 'trained' of its own) is due, even if the file was just written by crypto
+_mf.write_text(_j.dumps({"trained": ago(0), "crypto": {"trained": ago(0)}, "congress": {}, "insiders": {"trained": ago(1)}}))
+assert app.retrain_due() == ("congress", "insiders")
+print("stale stock model tests pass")
