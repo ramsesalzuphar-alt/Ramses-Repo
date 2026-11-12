@@ -15,6 +15,8 @@ stock_sources.json
 stock_history.json
 stock_events.jsonl
 my_orders.json
+shadow.json
+shadow.tmp
 
 # learned or downloaded data (rebuilt by learn.py and the scout)
 model.json
