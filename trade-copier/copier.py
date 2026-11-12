@@ -483,6 +483,9 @@ def decide_pelosi(item, auto=False, stake=1, limit=None, qty=None):
         desc = f"Limit buy {qty:g} {sym} at ${limit:,.2f} (${limit * qty:,.2f}), good for today"
         action = ("POST", "/v2/orders", {"symbol": sym, "qty": f"{qty:g}", "side": "buy", "type": "limit",
                                          "limit_price": f"{limit:.2f}" if limit >= 1 else f"{limit:.4f}", "time_in_force": "day"})
+    held = json.loads(SOURCES_FILE.read_text()) if SOURCES_FILE.exists() else {}
+    if auto and action[0] == "POST" and action[2]["symbol"] in held:  # several insiders filing the same stock: buy it once
+        return f"Already holding a copy of {action[2]['symbol']}, not bought again"
     if action[0] == "POST" and alpaca("GET", f"/v2/assets/{action[2]['symbol']}")[0] != 200:
         return f"Alpaca can't trade {action[2]['symbol']}, skipped"
     st, r = place(*action)

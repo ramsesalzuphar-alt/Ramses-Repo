@@ -56,3 +56,16 @@ assert copier.stock_rule({"auto": True, "feats": {"source": "company insider"}})
 assert copier.stock_rule({"auto": True, "feats": {"source": "House member"}}) == (copier.STOCK_TP, copier.STOCK_STOP, copier.STOCK_MAX_DAYS)
 assert copier.stock_rule({"auto": False, "feats": {"source": "company insider"}}) == (copier.STOCK_TP, None, None)
 print("insider exit rule tests pass")
+
+# the autopilot buys a stock once, even when several insiders file buys of it; you can still add more by hand
+import tempfile as _tf, pathlib as _pl, json as _js
+copier.SOURCES_FILE = _pl.Path(_tf.mkdtemp()) / "src.json"
+copier.alpaca = lambda *a, **k: (200, {})
+_placed = []
+copier.place = lambda *a: _placed.append(a) or (200, {})
+_buy = {"trade": {"Representative": "Doe Jane A", "Ticker": "DOX", "AssetType": "ST", "Transaction": "Purchase", "Range": "$50,000 - $50,000"},
+        "feats": {"source": "company insider"}}
+assert copier.decide_pelosi(_buy, auto=True).startswith("Done") and len(_placed) == 1
+assert "not bought again" in copier.decide_pelosi({**_buy, "trade": {**_buy["trade"], "Representative": "Roe Ann"}}, auto=True) and len(_placed) == 1
+assert copier.decide_pelosi(_buy).startswith("Done") and len(_placed) == 2
+print("buy-once tests pass")
