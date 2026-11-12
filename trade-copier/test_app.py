@@ -6,7 +6,7 @@ copied, bought, retrains = [], [], []
 stakes = []
 crypto_copier.decide_crypto = lambda item, auto=False, stake=1: copied.append((item["coin"], auto)) or stakes.append(stake) or f"Copied {item['coin']}"
 copier.decide_pelosi = lambda item, auto=False, stake=1: bought.append((item["title"], auto)) or stakes.append(stake) or f"Bought {item['title']}"
-app.threading.Thread = lambda target, daemon: type("T", (), {"start": lambda self: retrains.append(target)})()
+app.threading.Thread = lambda target, daemon, args=(): type("T", (), {"start": lambda self: retrains.append(target)})()
 ledger = {"start": 10000, "cash": 10000, "positions": {}, "history": []}
 crypto_copier.load_ledger = lambda: ledger
 stock_hist = []
@@ -33,13 +33,15 @@ app.set_autopilot(True, force=True)
 assert A["on"] and A["forced"] and "EXPERIMENT" in app.S["log"][0]["msg"]
 assert not app.ap("stocks")["on"]   # markets are independent
 
-# copies only STRONG crypto, most profitable first, max 5, marked as autopilot trades
+# copies only STRONG crypto, most profitable first, at most AUTO_MAX_PER_CHECK (5 here), marked as autopilot trades
+_max, app.AUTO_MAX_PER_CHECK = app.AUTO_MAX_PER_CHECK, 5
 app.S["pending"] = [{"kind": "crypto", "coin": f"C{i}", "title": f"C{i}", "score": 55 + i, "tier": "strong"} for i in range(7)] + \
                    [{"kind": "crypto", "coin": "WEAK1", "title": "WEAK1", "score": 54, "tier": "mid"},
                     {"kind": "pelosi", "coin": "NVDA", "title": "NVDA", "side": "buy", "score": 90, "tier": "strong"}]
 app.run_autopilot("crypto")
 assert copied == [(f"C{i}", True) for i in (6, 5, 4, 3, 2)], copied
 assert {x["coin"] for x in app.S["pending"]} == {"C0", "C1", "WEAK1", "NVDA"}
+app.AUTO_MAX_PER_CHECK = _max
 
 # loss guard: 10 closed autopilot trades losing $15 total -> pause and relearn
 def close_trades(n, pnl, t):
@@ -53,7 +55,7 @@ assert not A["on"] and A["resume"] and retrains == [app.retrain], app.S["log"][0
 assert app.S["auto"]["crypto"]["recent_pnl"] == -15.0
 
 # relearning resumes it (experiment still on), and the old losses no longer count against it
-app.learn.main = lambda: None
+app.learn.main = lambda only=None: None
 app.model_summary = lambda: app.S["model"]
 app.retrain()
 assert A["on"] and "resumed" in app.S["log"][0]["msg"]
@@ -182,3 +184,19 @@ _m["records"] = {"Loser": [25, 5, -1.0]}
 app.S["pending"] = [{"kind": "pelosi", "trade": {"Representative": "Loser"}, "feats": {"trader": "member Loser"}, "score": 70}]
 assert app.rescore() == 0 and app.S["pending"] == []   # a member whose copies lost is dropped from the waiting list
 print("rescore gate tests pass")
+
+# relearn schedules: crypto every 2 hours, stocks (House + insiders) once a day; never two relearns at once
+import json as _j
+from datetime import datetime as _dt, timedelta as _td
+_mf = app.APP_FILE.with_name("model.json"); copier.MODEL_FILE = _mf
+ago = lambda h: (_dt.now() - _td(hours=h)).isoformat(timespec="minutes")
+_mf.write_text(_j.dumps({"trained": ago(1), "crypto": {"trained": ago(3)}, "congress": {"trained": ago(5)}, "insiders": {"trained": ago(5)}}))
+app.S["training"] = False
+assert app.retrain_due() == ("crypto",)
+_mf.write_text(_j.dumps({"trained": ago(1), "crypto": {"trained": ago(1)}, "congress": {"trained": ago(25)}, "insiders": {"trained": ago(1)}}))
+assert app.retrain_due() == ("congress", "insiders")
+_mf.write_text(_j.dumps({"trained": ago(1), "crypto": {"trained": ago(1)}, "congress": {"trained": ago(1)}}))
+assert app.retrain_due() == ("congress", "insiders")   # insiders never trained: due
+app.S["training"] = True; assert app.retrain_due() == (); app.S["training"] = False
+_mf.unlink(); assert app.retrain_due() is None          # no model at all: learn everything
+print("relearn schedule tests pass")

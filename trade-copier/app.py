@@ -16,7 +16,10 @@ APP_FILE = HERE / "app_state.json"  # waiting proposals + activity log, so a res
 PORT, CHECK_EVERY, RETRY_AFTER = 8765, 5 * 60, 2 * 60  # crypto traders every 5 min; a failed check is retried after 2 min
 CONGRESS_EVERY = 30 * 60  # House filings change a few times a day: no need to download their index every 5 min
 last_congress = 0.0
-RETRAIN_EVERY, AUTO_MAX_PER_CHECK = 6 * 3600, 5  # relearn 4x a day: new graded trades reach the model and the unlock test sooner
+# relearn schedules: crypto's patterns change within weeks and new trades are graded every hour, so every 2 hours;
+# stocks get new data about once a day (filings; insider copies graded 10 trading days later)
+RETRAIN_EVERY = {("crypto",): 2 * 3600, ("congress", "insiders"): 24 * 3600}
+AUTO_MAX_PER_CHECK = 20  # autopilot copies up to 20 strong trades per 5-minute check
 EXPIRE_AFTER = 10 * 60  # seconds a crypto trade waits for you
 INSIDER_EXPIRE = 3 * 86400  # seconds after filing a company insider's buy waits for you
 MARKETS = ("crypto", "stocks")
@@ -180,16 +183,17 @@ def unlocked(m):
     return bool((((S["model"] or {}).get(m) or {}).get("live") or {}).get("edge"))
 
 
-def retrain():
-    """Runs learn.py in the background. Turns a market's autopilot off if its edge is gone; resumes guard pauses."""
+def retrain(only=None):
+    """Runs learn.py in the background (only: which models, default all). Turns a market's autopilot off if its edge
+    is gone; resumes guard pauses."""
     with lock:
         if S["training"]:
             return
         S["training"] = True
         publish()
     try:
-        learn.main()
-        result = "Relearned from all trades so far"
+        learn.main(only)
+        result = f"Relearned {' and '.join(only) if only else 'every model'} from all trades so far"
     except (Exception, SystemExit) as e:
         traceback.print_exc()
         result = f"Relearning failed ({e}); keeping the previous model"
@@ -234,8 +238,15 @@ def rescore():
 
 
 def retrain_due():
-    m = S["model"]
-    return not S["training"] and (not m or time.time() - datetime.fromisoformat(m["trained"]).timestamp() > RETRAIN_EVERY)
+    """The models whose schedule says relearn now (a model never trained counts as due), or () if none / busy."""
+    if S["training"]:
+        return ()
+    try:
+        m = json.loads(copier.MODEL_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None  # no model yet: learn everything
+    age = lambda n: time.time() - datetime.fromisoformat(m[n].get("trained") or m.get("trained") or "2000-01-01").timestamp() if m.get(n) else float("inf")
+    return tuple(n for names, every in RETRAIN_EVERY.items() if any(age(x) > every for x in names) for n in names)
 
 
 def run_autopilot(m):
@@ -384,8 +395,9 @@ def loop():
 def loop_once():
     """One check, then a quick exit check every minute until the next one."""
     deadline = time.time() + run_check()
-    if retrain_due():
-        threading.Thread(target=retrain, daemon=True).start()
+    due = retrain_due()
+    if due != ():
+        threading.Thread(target=retrain, args=(due,), daemon=True).start()
     while time.time() < deadline:
         if wake.wait(60):  # "Check now" pressed
             wake.clear()

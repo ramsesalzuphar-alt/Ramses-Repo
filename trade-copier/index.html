@@ -332,8 +332,8 @@ function autopilotCard(s, mk) {
               : "grows to ×2, ×3, then ×4 once its latest 20, 30, 40 closed trades made money in every block of 10."}
       Each trade is then sized by the model's win chance: ≤50% → ½ size, 60% → normal, 70% → 1½×, 80%+ → 2×, never above 4× the base.</div>`;
   const what = crypto
-    ? "copies STRONG crypto trades (its model's top 20% of scores) by itself · max 5 per check · closes by each trader's learned rule, else take profit +6% / stop loss −2% · paper"
-    : "buys STRONG House and insider purchases (their model's top 20%) by itself · max 5 per check · $1,000 each · sells on take profit +9%, stop loss −3%, after 30 days, or when the member sells · paper";
+    ? "copies STRONG crypto trades (its model's top 20% of scores) by itself · max 20 per check · closes by each trader's learned rule, else take profit +6% / stop loss −2% · paper"
+    : "buys STRONG House and insider purchases (their model's top 20%) by itself · max 20 per check · $1,000 each · sells on take profit +9%, stop loss −3%, after 30 days, or when the member sells · paper";
   const auto = (ap.on
     ? `<span class="pill on">AUTOPILOT ON${ap.forced ? " · EXPERIMENT" : ""}</span> <span class="sub">${what}</span>`
     : ap.resume ? `<span class="pill MIXED">PAUSED BY LOSS GUARD</span> <span class="sub">relearning from its losing trades, then resumes</span>`

@@ -264,7 +264,7 @@ CRYPTO_DAYS = 21  # crypto learns from the last 3 weeks only: in walk-forward te
 # times (+0.85% avg spread) while 90-200 days ranked them backwards; its patterns change fast (momentum flipped)
 
 
-def crypto_samples(n_traders=60, per_trader=300):
+def crypto_samples(n_traders=100, per_trader=500):
     now = int(time.time() * 1000)
     since = now - CRYPTO_DAYS * 24 * H
     addrs = [a for _, a, _ in top_traders(n_traders)]  # highest earners this month
@@ -394,7 +394,8 @@ def keep_on_error(fn, previous):
         return previous or {"graded": 0, "n_high": 0, "n_low": 0, "high": "none yet", "low": "none yet", "edge": False}
 
 
-def main():
+def main(only=None):
+    """Relearn the models named in `only` (congress, insiders, crypto; default all); the others keep their last model."""
     load_env()
     model = {"trained": datetime.now().isoformat(timespec="minutes")}
     try:
@@ -402,6 +403,10 @@ def main():
     except (OSError, json.JSONDecodeError):
         prev = {}
     for name, build in (("congress", congress_samples), ("insiders", insider_samples), ("crypto", crypto_samples)):
+        if only and name not in only:
+            if name in prev:
+                model[name] = prev[name]
+            continue
         try:
             samples = build()
         except Exception as e:  # one market's data failing (e.g. a dropped connection) mustn't throw away the other's
@@ -419,6 +424,7 @@ def main():
                        # score with per-trader models only while they rank trades better than the pooled one
                        "use_personal": vp["spread"] > v["spread"]}
         model[name]["bars"] = (vp if model[name]["use_personal"] else v)["bars"]
+        model[name]["trained"] = model["trained"]  # each market relearns on its own schedule
         print(f"  bars: strong = {model[name]['bars'][1]}+, weak = {model[name]['bars'][0]} or less (its top / bottom 20%)")
         print(f"  scoring with {'per-trader' if model[name]['use_personal'] else 'pooled'} models (better backtest)")
         model[name]["profiles"] = profiles(samples, model[name])
