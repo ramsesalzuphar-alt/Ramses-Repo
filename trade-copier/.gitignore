@@ -26,5 +26,8 @@ scout.json
 scout.tmp
 congress_cache.json
 congress_cache.tmp
+insider_cache.json
+insider_cache.tmp
+insider_seen.json
 
 __pycache__/

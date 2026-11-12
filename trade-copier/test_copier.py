@@ -62,8 +62,8 @@ assert learn.copy_result(closes, "ETH", t0, "long") is None
 import time as _t
 old = int(_t.time() * 1000) - 30 * H
 V = learn.SCORING
-learn.logged_events = lambda: [{"t": old, "coin": "BTC", "side": "long", "score": 70, "v": V}] * 25 + \
-                              [{"t": old, "coin": "BTC", "side": "short", "score": 30, "v": V}] * 25 + \
+learn.logged_events = lambda: [{"t": old, "coin": "BTC", "side": "long", "score": 70, "v": V, "tier": "strong"}] * 25 + \
+                              [{"t": old, "coin": "BTC", "side": "short", "score": 30, "v": V, "tier": "weak"}] * 25 + \
                               [{"t": old, "coin": "BTC", "side": "short", "score": 90}] * 40 + \
                               [{"t": old, "coin": "BTC", "side": "long", "score": None}] * 50   # unscored, or scored the old way: ignored
 learn.hourly_closes = lambda coins, since, now: {"BTC": {old - H - old % H: 1, old - 25 * H - old % H: 1,
@@ -198,11 +198,12 @@ L2.MODEL_FILE.write_text(_json.dumps({"crypto": {"old": True}, "live": PREV_LIVE
 L2.load_env = lambda: None
 def boom(): raise OSError("connection reset")
 samples = [({"kind": "Purchase", "trader": f"member {i % 3}"}, 0.01 * ((i % 5) - 2)) for i in range(120)]
-L2.congress_samples, L2.crypto_samples = (lambda: samples), boom
+L2.congress_samples, L2.crypto_samples, L2.insider_samples = (lambda: samples), boom, boom   # SEC down too
 L2.live_stock_record, L2.live_record = (lambda: {"graded": 1, "n_high": 0, "n_low": 0, "high": "-", "low": "-", "edge": False}), boom
 L2.main()
 saved = _json.loads(L2.MODEL_FILE.read_text())
 assert saved["crypto"] == {"old": True} and saved["congress"]["n"] == 120 and saved["live"] == PREV_LIVE, saved.keys()
+assert "insiders" not in saved   # no insider data and no previous insider model: none (stock scoring of insiders waits)
 print("learn resilience tests pass")
 
 # a meaningful edge: high-scored trades must average +0.5% or more, not just "above zero"
@@ -292,3 +293,30 @@ assert "Limit buy 3 DDOG at $180.50 ($541.50)" in msg, msg
 cp2.decide_pelosi(it)
 assert sent[-1]["type"] == "market"                                          # no price given: as before
 print("stock limit order tests pass")
+
+# bars: each model's own bottom / top 20% of scores on trades it never saw; tiers by them (fixed 45/60 without a model)
+assert learn.score_bars(list(range(100))) == [20, 80] and learn.score_bars([50] * 10) == [50, 51] and learn.score_bars([]) == [45, 60]
+assert [cp.tier({"bars": [47, 52]}, s) for s in (52, 51, 47)] == ["strong", "mid", "weak"] and cp.tier(None, 60) == "strong"
+assert cp.verdict_of({"bars": [47, 52]}, 53) == "STRONG" and cp.verdict_of(None, 65) == "MIXED"
+print("score bar tests pass")
+
+# crypto samples: latest fills only inside the 21-day window; a position the app also logged counts once
+import time as _tm
+import importlib; L3 = importlib.reload(learn)   # the real crypto_samples (an earlier test replaced it)
+_now = int(_tm.time() * 1000); _H = L3.H
+fill = lambda t, coin: {"time": t, "coin": coin, "dir": "Open Long", "startPosition": "0"}
+L3.top_traders = lambda n, w="month": [(1, "A", None)]
+L3.high_winners = L3.watchlist = lambda *a, **k: []
+L3.hl = lambda body: [fill(_now - 30 * 24 * _H, "OLD"), fill(_now - 5 * 24 * _H, "DUP"), fill(_now - 3 * 24 * _H, "NEW")]
+L3.logged_events = lambda: [{"t": _now - 5 * 24 * _H + 60_000, "entered_at": _now - 5 * 24 * _H, "addr": "A", "coin": "DUP", "side": "long"}]
+L3.fear_greed = lambda: {}
+L3.daily_closes = L3.hourly_closes = lambda *a, **k: {}
+L3.candles_5m = lambda *a, **k: []
+_graded = []
+L3.copy_result = lambda closes, coin, t, side: _graded.append(coin) or (0.0, 0.01)
+L3.load_ledger = lambda: {"history": []}
+_sleep, L3.time.sleep = L3.time.sleep, (lambda s: None)
+out = L3.crypto_samples()
+L3.time.sleep = _sleep
+assert sorted(_graded) == ["DUP", "NEW"] and len(out) == 2, _graded   # OLD is outside 21 days; DUP once, not twice
+print("crypto sample window tests pass")

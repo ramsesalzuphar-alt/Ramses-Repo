@@ -16,9 +16,9 @@ APP_FILE = HERE / "app_state.json"  # waiting proposals + activity log, so a res
 PORT, CHECK_EVERY, RETRY_AFTER = 8765, 5 * 60, 2 * 60  # crypto traders every 5 min; a failed check is retried after 2 min
 CONGRESS_EVERY = 30 * 60  # House filings change a few times a day: no need to download their index every 5 min
 last_congress = 0.0
-AUTO_MIN = 55  # autopilot copies trades scored 55+ (the live unlock test still judges STRONG, 60+)
 RETRAIN_EVERY, AUTO_MAX_PER_CHECK = 6 * 3600, 5  # relearn 4x a day: new graded trades reach the model and the unlock test sooner
 EXPIRE_AFTER = 10 * 60  # seconds a crypto trade waits for you
+INSIDER_EXPIRE = 3 * 86400  # seconds after filing a company insider's buy waits for you
 MARKETS = ("crypto", "stocks")
 # loss guard: last 10 autopilot trades losing more than ~1% each on average -> pause + relearn ($100 crypto, $1000 stock copies)
 GUARD_LAST, GUARD_MAX_TRIPS, GUARD_LOSS = 10, 3, {"crypto": -10.0, "stocks": -100.0}
@@ -170,7 +170,8 @@ def model_summary():
         if not x:
             return {"live": live}
         return {"n": x.get("n"), "base_win": x["base"][2], "patterns": x.get("patterns", []), "backtest": x["validation"],
-                "personal": x.get("validation_personal"), "profiles": x.get("profiles", [])[:24], "live": live}
+                "personal": x.get("validation_personal"), "profiles": x.get("profiles", [])[:24], "live": live,
+                "bars": x.get("bars")}  # its own top / bottom 20% of scores
     return {"trained": m["trained"], "rule": {"strong": learn.STRONG, "weak": learn.WEAK, "min_each": learn.MIN_EACH},
             "crypto": sec(m.get("crypto"), m.get("live")), "stocks": sec(m.get("congress"), m.get("live_stocks"))}
 
@@ -215,20 +216,19 @@ def retrain():
 def rescore():
     """Re-score the waiting stock trades with the model just learned (crypto ones expire within 10 minutes anyway);
     drop those of members whose copies have lost."""
-    m = copier.load_model("congress")
-    if not m:
-        return 0
+    models = {"house": copier.load_model("congress"), "insider": copier.load_model("insiders")}
     n = 0
     for x in list(S["pending"]):
-        if x["kind"] == "pelosi" and x.get("feats"):
+        m = models.get(x.get("src", "house"))
+        if x["kind"] == "pelosi" and x.get("feats") and m:
             x["feats"].update(copier.record_feature((m.get("records") or {}).get(x["trade"]["Representative"])))
             score, why = copier.predict_for_trader(m, x["feats"])
-            score = copier.member_gate(m, x["trade"]["Representative"], score, why)
+            score = copier.member_gate(m, x["trade"]["Representative"], score, why, proven_only=x.get("src") != "insider")
             if score is None:
                 S["pending"].remove(x)
                 continue
             x["score"], x["why"] = score, why
-            x["win"], x["verdict"] = copier.win_chance(m, x["feats"]), copier.verdict(x["score"], 60)
+            x["win"], x["verdict"], x["tier"] = copier.win_chance(m, x["feats"]), copier.verdict_of(m, score), copier.tier(m, score)
             n += 1
     return n
 
@@ -245,7 +245,7 @@ def run_autopilot(m):
     if not (a["on"] and (a["forced"] or unlocked(m))):
         return
     mine = (lambda x: x["kind"] == "crypto") if m == "crypto" else (lambda x: x["kind"] == "pelosi" and x["side"] == "buy")
-    strong = sorted((x for x in S["pending"] if mine(x) and x["score"] >= AUTO_MIN), key=lambda x: -x["score"])
+    strong = sorted((x for x in S["pending"] if mine(x) and x.get("tier") == "strong"), key=lambda x: -x["score"])  # its model's top 20%
     x = stake(m)
     for item in strong[:AUTO_MAX_PER_CHECK]:
         S["pending"].remove(item)
@@ -264,13 +264,15 @@ def run_autopilot(m):
 
 
 def expire():
-    """Crypto trades waiting for you disappear 10 minutes after they were spotted: after that the copy price is stale."""
-    cutoff = (time.time() - EXPIRE_AFTER) * 1000
-    old = [x for x in S["pending"] if x.get("seen_at") and x["seen_at"] < cutoff]
+    """Crypto trades waiting for you disappear 10 minutes after they were spotted: after that the copy price is stale.
+    Company insider buys disappear 3 days after filing: most of their move comes in the first days."""
+    cutoff, ins_cutoff = (time.time() - EXPIRE_AFTER) * 1000, (time.time() - INSIDER_EXPIRE) * 1000
+    old = [x for x in S["pending"] if (x.get("seen_at") and x["seen_at"] < cutoff)
+           or (x.get("src") == "insider" and x["filed_at"] < ins_cutoff)]
     for x in old:
         S["pending"].remove(x)
     if old:
-        log(f"Expired {len(old)} waiting trade(s) after {EXPIRE_AFTER // 60} min: {', '.join(x['title'] for x in old)}")
+        log(f"Expired {len(old)} waiting trade(s): {', '.join(x['title'] for x in old)}")
 
 
 def log(msg):
@@ -338,6 +340,10 @@ def run_check():
             if time.time() - last_congress >= CONGRESS_EVERY:
                 copier.check_pelosi(S["pending"], log)
                 last_congress = time.time()
+            try:  # company insiders (SEC Form 4) every check: they're filed within 2 days, so speed matters
+                copier.check_pelosi(S["pending"], log, insiders=True)
+            except Exception as e:
+                log(f"Insider filings unavailable this check: {e}")
             ids = {id(x) for x in S["pending"]}
             S["traders"] = crypto_copier.check_crypto(S["pending"], log)
             practice([x for x in S["pending"] if x.get("kind") == "crypto" and id(x) not in ids], full=True)
@@ -476,8 +482,8 @@ def set_autopilot(on, force=False, m="crypto"):
                     "Use Run experiment to try it anyway.")
         a.update(on=on, forced=bool(on and not unlocked(m)), guard_since=datetime.now().isoformat(timespec="seconds"),
                  guard_trips=[], resume=False)
-        what = (f"copies crypto trades scored {AUTO_MIN}+ by expected profit" if m == "crypto"
-                else f"buys congressional trades scored {AUTO_MIN}+ by expected profit")
+        what = ("copies STRONG crypto trades (its model's top 20%) by expected profit" if m == "crypto"
+                else "buys STRONG House and insider trades (their model's top 20%) by expected profit")
         log(f"{m.title()} autopilot OFF" if not on else
             f"{m.title()} autopilot ON{' as an EXPERIMENT (model not proven yet)' if a['forced'] else ''}: {what}, "
             f"max {AUTO_MAX_PER_CHECK} per check, loss guard active (paper)")

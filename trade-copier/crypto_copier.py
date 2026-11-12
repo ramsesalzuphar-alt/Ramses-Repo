@@ -8,7 +8,7 @@ import json, os, statistics, time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from copier import SCORING, TRACK_BONUS, track_gate, load_env, http, load_model, predict_for_trader, win_chance, verdict, daily_closes, global_features, GLOBAL_SYMBOLS
+from copier import SCORING, TRACK_BONUS, track_gate, tier, verdict_of, load_env, http, load_model, predict_for_trader, win_chance, verdict, daily_closes, global_features, GLOBAL_SYMBOLS
 
 HERE = Path(__file__).parent
 STATE_FILE = HERE / "crypto_state.json"
@@ -446,7 +446,8 @@ def check_crypto(pending, log):
                 win = None
             # every new position is logged with its learned score, copied or not, so learn.py can grade it 24h later
             f.write(json.dumps({"t": now_ms, "addr": addr, "coin": coin, "side": side, "entered_at": when,
-                                "score": score if learned else None, "v": SCORING}) + "\n")
+                                "score": score if learned else None, "v": SCORING,
+                                "tier": tier(model, score) if learned else None}) + "\n")
             if coin in ledger["positions"] or (addr, coin) in waiting or coin not in mids:
                 continue
             rec, gate = track.get(addr), track_gate(track.get(addr))
@@ -462,7 +463,8 @@ def check_crypto(pending, log):
                             "entered_at": when, "entry_px": their_px, "price_now": float(mids[coin]),
                             "volume": full[addr][coin][1],  # the trader's position size in $
                             "seen_at": int(datetime.now().timestamp() * 1000),
-                            "score": score, "verdict": verdict(score, 60 if model else 70), "why": why, "feats": feats, "win": win})
+                            "score": score, "verdict": verdict_of(model if learned else None, score), "tier": tier(model, score) if learned else None,
+                            "why": why, "feats": feats, "win": win})
     entered = [names[a] for a in tops if a not in old]
     if old and entered:
         log(f"Now watching: {', '.join(entered)} (recorded their current positions)")

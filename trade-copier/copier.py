@@ -4,6 +4,7 @@ Keys are read from .mcp.json (alpaca env block). Optional settings in .env: DOLL
 """
 import io, json, os, re, shutil, statistics, subprocess, tempfile, urllib.request, urllib.error, zipfile
 import xml.etree.ElementTree as ET
+import insider
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -68,22 +69,32 @@ def track_gate(rec):
     return "drop" if rec["avg"] < 0 else "boost" if rec["avg"] >= TRACK_BONUS_AVG else None
 
 
-def member_gate(model, name, score, why):
+def member_gate(model, name, score, why, proven_only=True):
     """Which members the stock bot proposes, like crypto's watched traders: only proven ones, whose 20+ graded copies
     beat the market. None = don't propose (still logged and graded, so others can earn their way in); else the score
     (+5 and a reason in `why` for a member whose copies beat it by +0.5%+)."""
     n, wins, total = (model.get("records") or {}).get(name) or (0, 0, 0.0)
     rec = {"n": n, "win": wins / n, "avg": total / n} if n else None
     gate = track_gate(rec)
-    if gate == "drop" or not rec or rec["n"] < TRACK_MIN or rec["avg"] <= 0:
-        return None
+    if gate == "drop" or (proven_only and (not rec or rec["n"] < TRACK_MIN or rec["avg"] <= 0)):
+        return None  # insiders (proven_only=False) rarely trade 20 times: only a losing record keeps them out
     if gate == "boost":
         why.insert(0, f"copies of {name} beat the market by {rec['avg']:+.2%} avg ({rec['win']:.0%} won, n={rec['n']}): +{TRACK_BONUS}")
         return min(100, score + TRACK_BONUS)
     return score
 
 
-SCORING = 2  # bump when HOW trades are scored changes: the live test judges only trades scored the current way
+SCORING = 4  # bump when HOW trades are scored changes: the live test judges only trades scored the current way
+
+
+def tier(model, score):
+    """'strong' / 'mid' / 'weak' by the model's own bars (its top / bottom 20% of scores), else fixed 60 / 45."""
+    weak, strong = (model or {}).get("bars") or (45, 60)
+    return "strong" if score >= strong else "weak" if score <= weak else "mid"
+
+
+def verdict_of(model, score):
+    return {"strong": "STRONG", "mid": "MIXED", "weak": "WEAK"}[tier(model, score)] if model else verdict(score)
 
 
 def verdict(score, strong=70):
@@ -258,15 +269,20 @@ def pelosi_features(t):
 def daily_closes(symbols, start, end):
     """{symbol: [(YYYY-MM-DD, split-adjusted close), ...]} from Alpaca market data (your paper keys work), 100 symbols a call."""
     h = {"APCA-API-KEY-ID": os.environ["ALPACA_KEY"], "APCA-API-SECRET-KEY": os.environ["ALPACA_SECRET"]}
-    if end >= date.today().isoformat():  # the free plan refuses the last 15 minutes of data (403), so stop just before
+    if end >= (date.today() - timedelta(days=1)).isoformat():  # the free plan refuses the last 15 minutes of data (403), so
+        # stop just before ('yesterday' runs to midnight New York time, which is the last 15 minutes just after midnight)
         end = (datetime.now(timezone.utc) - timedelta(minutes=16)).strftime("%Y-%m-%dT%H:%M:%SZ")
     out, syms = {}, sorted(symbols)
     for i in range(0, len(syms), 100):
-        token = None
+        token, batch = None, syms[i:i + 100]
         while True:
-            url = (f"https://data.alpaca.markets/v2/stocks/bars?symbols={','.join(syms[i:i + 100])}&timeframe=1Day"
+            url = (f"https://data.alpaca.markets/v2/stocks/bars?symbols={','.join(batch)}&timeframe=1Day"
                    f"&start={start}&end={end}&adjustment=all&limit=10000" + (f"&page_token={token}" if token else ""))
             st, d = http("GET", url, h)
+            bad = re.search(r"invalid symbol: ([^\"'}\s]+)", str(d)) if st == 400 else None
+            if bad and bad.group(1) in batch:  # one odd ticker mustn't sink the other 99: drop it and ask again
+                batch.remove(bad.group(1))
+                continue
             if st != 200:
                 raise RuntimeError(f"Alpaca data error {st}: {d}")
             for sym, bars in (d.get("bars") or {}).items():
@@ -321,10 +337,22 @@ def global_features(closes, day, side):
     return out
 
 
+def insider_features(t):
+    """Who's buying, for company insiders: their role, whether other insiders of the company bought too (a cluster),
+    and how much they grew their stake. House trades get just their source, so one model can tell them apart."""
+    if t.get("Source") != "insider":
+        return {"source": "House member"}
+    st = t.get("Stake")
+    return {"source": "company insider", "role": "insider: " + t.get("Role", "other"),
+            "cluster": "other insiders bought too (30d)" if t.get("Cluster") else "lone insider buy",
+            "stake": "stake up 20%+" if st and st >= 0.2 else "stake up under 20%" if st else "stake: unknown"}
+
+
 def stock_features(t, closes, day):
     """Traits learn.py learns from and the live copier scores on (same function for both): size, kind, filing lag,
     the member (so each member gets their own model), and the stock's trend vs the market before `day`."""
-    return {**pelosi_features(t), "trader": "member " + t["Representative"],
+    return {**pelosi_features(t), **insider_features(t),
+            "trader": ("insider " if t.get("Source") == "insider" else "member ") + t["Representative"],
             **trend_feature(closes.get(t["Ticker"], []), closes.get("SPY", []), day, t["Transaction"]),
             **market_features(closes.get("SPY", []), day, t["Transaction"]),
             **global_features(closes, day, "buy" if t["Transaction"] == "Purchase" else "sell")}
@@ -366,8 +394,9 @@ def plan_order(t, notional):
     return f"skip: unknown transaction type {kind!r}", None
 
 
-def check_pelosi(pending, log):
-    """Look for new House trade filings from every member (or just POLITICIAN in .env, e.g. Pelosi).
+def check_pelosi(pending, log, insiders=False):
+    """Look for new House trade filings from every member (or just POLITICIAN in .env, e.g. Pelosi); insiders=True:
+    new company-insider filings (SEC Form 4) instead, through the same scoring, gate and copying.
     A full sale by the member you copied a stock from sells it automatically (that's their exit); other trades
     go to `pending` for your approval, rated by urgency (size). log(msg) records what happened."""
     load_env()
@@ -376,11 +405,14 @@ def check_pelosi(pending, log):
     seen = set(json.loads(SEEN_FILE.read_text())) if SEEN_FILE.exists() else set()
     docs = set(json.loads(DOCS_FILE.read_text())) if DOCS_FILE.exists() else set()
     sources = json.loads(SOURCES_FILE.read_text()) if SOURCES_FILE.exists() else {}
-    model = load_model("congress")  # learned from every member's trades, with personal models for active members
-    try:
-        trades = fetch_trades(who, skip_docs=docs)
-    finally:
-        DOCS_FILE.write_text(json.dumps(sorted(docs)))
+    model = load_model("insiders" if insiders else "congress")  # learned from all their trades, with personal models
+    if insiders:
+        trades = insider.live(log)
+    else:
+        try:
+            trades = fetch_trades(who, skip_docs=docs)
+        finally:
+            DOCS_FILE.write_text(json.dumps(sorted(docs)))
     today = date.today().isoformat()
     try:  # prices for the trend-before-filing feature, all symbols in one go
         closes = daily_closes({t["Ticker"] for t in trades if t["Ticker"]} | {"SPY"} | GLOBAL_SYMBOLS,
@@ -400,7 +432,7 @@ def check_pelosi(pending, log):
         if action[0] == "DELETE":
             if alpaca("GET", f"/v2/positions/{sym}")[0] != 200:
                 continue  # you don't hold it
-            if t["Transaction"] == "Sale" and rep_of(sources.get(sym)) == name:
+            if t["Transaction"] in ("Sale", "Sale (Full)") and rep_of(sources.get(sym)) == name:
                 if close_stock(sym, f"{name}, who you copied it from, sold their whole position", sources, log) is None:
                     seen.discard(k)  # retry next check
                 continue
@@ -414,8 +446,9 @@ def check_pelosi(pending, log):
             why.append("rule-based: relearn to learn from every member's history")
             win = None
         events.append({"t": int(datetime.now().timestamp() * 1000), "day": today, "rep": name, "sym": sym,
-                       "kind": t["Transaction"], "score": score if model else None, "v": SCORING})
-        if model and (score := member_gate(model, name, score, why)) is None:
+                       "kind": t["Transaction"], "score": score if model else None, "v": SCORING, "src": t.get("Source", "house"),
+                       "tier": tier(model, score) if model else None})
+        if model and (score := member_gate(model, name, score, why, proven_only=not insiders)) is None:
             continue  # copying this member has lost vs the market: still logged and graded, never proposed
         lvl, label = urgency(t)
         bars = closes.get(sym) or []
@@ -425,11 +458,12 @@ def check_pelosi(pending, log):
                         "entry_px": theirs[-1] if theirs else None, "price_now": bars[-1][1] if bars else None,
                         "side": "buy" if action[0] == "POST" else "sell",
                         "title": f"{name} {t['Transaction'].lower()} {sym}",
-                        "detail": "Alpaca paper",
+                        "detail": f"Alpaca paper · company insider ({t['Role']})" if insiders else "Alpaca paper", "src": t.get("Source", "house"),
                         "urgency": lvl, "urgency_label": label,
                         "entered_at": int(datetime.strptime(t["TransactionDate"], "%m/%d/%Y").timestamp() * 1000),
                         "filed_at": int(datetime.strptime(t["ReportDate"], "%m/%d/%Y").timestamp() * 1000),
-                        "score": score, "verdict": verdict(score, 60 if model else 70), "why": why, "feats": feats, "win": win})
+                        "score": score, "verdict": verdict_of(model, score), "tier": tier(model, score) if model else None,
+                        "why": why, "feats": feats, "win": win})
     SEEN_FILE.write_text(json.dumps(sorted(seen)))
     SOURCES_FILE.write_text(json.dumps(sources))
     with STOCK_EVENTS.open("a") as f:  # every scored trade, copied or not, so learn.py can grade it a month later

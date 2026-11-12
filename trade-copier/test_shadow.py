@@ -7,23 +7,23 @@ shadow.FILE = pathlib.Path(tempfile.mkdtemp()) / "shadow.json"   # never the rea
 app.shadow.FILE = shadow.FILE
 cc.scout_exit = lambda addr: {"name": "habit", "tp": 0.03, "sl": 0.01} if addr == "S" else None
 t0 = datetime(2026, 11, 1, 12)
-item = lambda addr, coin, side, score, px=100.0: {"kind": "crypto", "addr": addr, "coin": coin, "side": side, "score": score, "price_now": px}
-shadow.open_new([item("A", "ETH", "long", 58), item("S", "SOL", "short", 62), item("A", "BTC", "long", 30),
+item = lambda addr, coin, side, tier, px=100.0: {"kind": "crypto", "addr": addr, "coin": coin, "side": side, "score": 50, "tier": tier, "price_now": px}
+shadow.open_new([item("A", "ETH", "long", "mid"), item("S", "SOL", "short", "strong"), item("A", "BTC", "long", "weak"),
                  {"kind": "pelosi", "score": 99}], scouted={"S"}, now=t0)
 b = shadow.load()
 assert set(b["Every proposal"]["open"]) == {"A:ETH:long", "S:SOL:short", "A:BTC:long"}
-assert set(b["Score 55+"]["open"]) == {"A:ETH:long", "S:SOL:short"} and set(b["Score 60+"]["open"]) == {"S:SOL:short"}
-assert set(b["Scout finds only, 55+"]["open"]) == {"S:SOL:short"}
-assert b["Score 55+"]["open"]["S:SOL:short"]["exit"]["tp"] == 0.03 and b["Score 55+, fixed exits"]["open"]["S:SOL:short"]["exit"] is None
-shadow.open_new([item("A", "ETH", "long", 58, px=200)], scouted=set(), now=t0)   # same trade again: not doubled
-assert shadow.load()["Score 55+"]["open"]["A:ETH:long"]["entry"] == 100.0
+assert set(b["Not weak (top 80%)"]["open"]) == {"A:ETH:long", "S:SOL:short"} and set(b["Strong (the autopilot's rule)"]["open"]) == {"S:SOL:short"}
+assert set(b["Scout finds only, strong"]["open"]) == {"S:SOL:short"}
+assert b["Strong (the autopilot's rule)"]["open"]["S:SOL:short"]["exit"]["tp"] == 0.03 and b["Strong, fixed exits"]["open"]["S:SOL:short"]["exit"] is None
+shadow.open_new([item("A", "ETH", "long", "mid", px=200)], scouted=set(), now=t0)   # same trade again: not doubled
+assert shadow.load()["Not weak (top 80%)"]["open"]["A:ETH:long"]["entry"] == 100.0
 
 # SOL falls 3.5%: a short's learned TP (3%) closes it; the fixed-exit book waits for 6%. ETH +1%: nothing yet.
 shadow.update({"SOL": "96.5", "ETH": "101", "BTC": "100"}, now=t0 + timedelta(hours=1))
 tr = shadow.trades()
-c = tr["Score 60+"][0]
+c = tr["Strong (the autopilot's rule)"][0]
 assert len(c) == 1 and c[0]["why"] == "take profit" and abs(c[0]["ret"] - (0.035 - 2 * cc.FEE)) < 1e-9 and abs(c[0]["pnl"] - 100 * c[0]["ret"]) < 1e-9
-assert tr["Score 55+, fixed exits"] == ([], 2)
+assert tr["Strong, fixed exits"] == ([], 1)
 # the full check shows A left ETH -> closed; BTC (still held) only by the 3-day limit
 shadow.update({"ETH": "101", "BTC": "100", "SOL": "96.5"}, holdings={"A": {"BTC": "long"}}, now=t0 + timedelta(hours=2))
 assert [x["why"] for x in shadow.trades()["Every proposal"][0]] == ["take profit", "trader exited"]
@@ -35,5 +35,5 @@ app.S["graduates"] = []
 app.closed_trades = lambda m: ([], 0)
 app.graduation()
 names = {r["name"]: r for r in app.S["grad"]}
-assert {f"Practice: {k}" for k in shadow.STRATEGIES} <= set(names) and names["Practice: Score 60+"]["n"] == 1, list(names)
+assert {f"Practice: {k}" for k in shadow.STRATEGIES} <= set(names) and names["Practice: Strong (the autopilot's rule)"]["n"] == 1, list(names)
 print("practice strategy tests pass")

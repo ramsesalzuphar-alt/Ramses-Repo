@@ -11,6 +11,7 @@ Run: python learn.py   (the app also runs it daily; takes ~10 min)
 """
 from http.client import HTTPException
 import json, os, statistics, sys, time
+import insider
 from datetime import date, datetime, timedelta, timezone
 from copier import (SCORING, http, load_env, fetch_trades, stock_features, record_feature, predict, predict_for_trader, daily_closes, stock_history,
                     global_features, GLOBAL_SYMBOLS,
@@ -20,7 +21,8 @@ from crypto_copier import (top_traders, crypto_features, is_new_position, candle
 
 G, R, B, D, X = "\033[32m", "\033[31m", "\033[1m", "\033[2m", "\033[0m"  # terminal colors
 H = 3_600_000  # one hour in ms
-STRONG, WEAK, MIN_EACH = 60, 45, 20  # live test: STRONG trades must beat WEAK ones, with at least 20 of each
+STRONG, WEAK, MIN_EACH = 60, 45, 20  # live test: STRONG trades (each model's top 20%) must beat WEAK ones (bottom 20%),
+# with at least 20 of each. 60 / 45 are only the fallback bars before a model has learned its own (score_bars)
 
 
 STABLE_N = 10  # examples a trait needs in every third of history to count
@@ -104,27 +106,40 @@ def validate(samples, fit_fn=fit, predict_fn=predict):
     cut = int(len(samples) * 0.7)
     m, test = fit_fn(samples[:cut]), samples[cut:]
     scored = [(predict_fn(m, f)[0], r) for f, r in test]
-    hi, lo = [r for s, r in scored if s >= 55], [r for s, r in scored if s < 45]
+    weak, strong = score_bars([s for s, _ in scored])
+    hi, lo = [r for s, r in scored if s >= strong], [r for s, r in scored if s <= weak]
     return {"all": summ([r for _, r in scored]), "high": summ(hi), "low": summ(lo), "edge": has_edge(hi, lo),
-            "spread": statistics.fmean(hi) - statistics.fmean(lo) if hi and lo else 0.0}  # how well it ranks trades
+            "spread": statistics.fmean(hi) - statistics.fmean(lo) if hi and lo else 0.0,  # how well it ranks trades
+            "bars": [weak, strong]}
+
+
+def score_bars(scores, share=0.2):
+    """[weak, strong]: the scores marking a model's bottom and top 20%, from trades it never saw. Scores bunch up
+    near 50, so fixed bars (45 / 60) can leave nothing strong at all; these always split off the model's own best
+    and worst picks, and are what the autopilot, practice books and live test judge by."""
+    s = sorted(scores)
+    if not s:
+        return [45, 60]
+    weak, strong = s[int(len(s) * share)], s[min(len(s) - 1, int(len(s) * (1 - share)))]
+    return [weak, max(strong, weak + 1)]
 
 
 HOLD_DAYS = 21  # trading days a congressional copy is judged over (about a month)
 
 
-def excess_after(bars, spy, spy_day, sym, day, sale):
-    """The stock's return minus SPY's over HOLD_DAYS trading days, entering the first trading day after `day`.
+def excess_after(bars, spy, spy_day, sym, day, sale, hold=HOLD_DAYS):
+    """The stock's return minus SPY's over `hold` trading days, entering the first trading day after `day`.
     A sale 'wins' if the stock then lags. None if prices are missing or it's too recent to know."""
     sb = bars.get(sym)
     if not sb:
         return None  # renamed or delisted ticker
     i = next((k for k, (d, _) in enumerate(sb) if d > day), None)
-    if i is None or i + HOLD_DAYS >= len(sb) or sb[i][0] not in spy_day:
+    if i is None or i + hold >= len(sb) or sb[i][0] not in spy_day:
         return None
     j = spy_day[sb[i][0]]
-    if j + HOLD_DAYS >= len(spy):
+    if j + hold >= len(spy):
         return None
-    ex = (sb[i + HOLD_DAYS][1] / sb[i][1] - 1) - (spy[j + HOLD_DAYS][1] / spy[j][1] - 1)
+    ex = (sb[i + hold][1] / sb[i][1] - 1) - (spy[j + hold][1] / spy[j][1] - 1)
     return -ex if sale else ex
 
 
@@ -159,6 +174,27 @@ def congress_samples(since_year=2022):
     own = [(h["feats"], h["ret"]) for h in stock_history() if h.get("feats") and "ret" in h]
     print(f"  {len(out)} graded; + {len(own)} of its own closed stock trades (real wins and losses)", flush=True)
     return [(f, r) for _, f, r in out] + own
+
+
+def insider_samples():
+    """Every company insider's open-market buy since 2024 (SEC Form 4), graded over insider.HOLD trading days.
+    Its own model: one model pooled with House trades scored both worse in the backtest."""
+    trades = insider.history()
+    print(f"Insiders: {len(trades)} company insider buys by {len({t['Representative'] for t in trades})} insiders; fetching prices...", flush=True)
+    start = min(insider.iso(t["ReportDate"]) for t in trades) - timedelta(days=60)
+    bars = daily_closes({t["Ticker"] for t in trades} | {"SPY"} | GLOBAL_SYMBOLS, start.isoformat(), (date.today() - timedelta(days=1)).isoformat())
+    spy = bars["SPY"]
+    spy_day = {d: i for i, (d, _) in enumerate(spy)}
+    out = []
+    for t in trades:
+        filed = insider.iso(t["ReportDate"]).isoformat()
+        r = excess_after(bars, spy, spy_day, t["Ticker"], filed, False, insider.HOLD)
+        if r is not None:
+            out.append((filed, stock_features(t, bars, filed), r))
+    out.sort(key=lambda x: x[0])
+    add_records(out)
+    print(f"  {len(out)} insider buys graded", flush=True)
+    return [(f, r) for _, f, r in out]
 
 
 RECORDS = {}  # member -> [n, wins, total] of every graded copy, saved in the model for live scoring
@@ -224,9 +260,13 @@ def logged_events():
     return [json.loads(l) for l in EVENTS_FILE.read_text().splitlines() if l.strip()] if EVENTS_FILE.exists() else []
 
 
+CRYPTO_DAYS = 21  # crypto learns from the last 3 weeks only: in walk-forward tests 21 days ranked trades right 4 of 5
+# times (+0.85% avg spread) while 90-200 days ranked them backwards; its patterns change fast (momentum flipped)
+
+
 def crypto_samples(n_traders=60, per_trader=300):
     now = int(time.time() * 1000)
-    since = now - 200 * 24 * H
+    since = now - CRYPTO_DAYS * 24 * H
     addrs = [a for _, a, _ in top_traders(n_traders)]  # highest earners this month
     for a in ([a for _, a, _ in top_traders(20, "allTime")]  # highest earners of all time
               + [a for a, _, _ in high_winners()]           # highest, most reliable win rates the scout has measured
@@ -239,8 +279,10 @@ def crypto_samples(n_traders=60, per_trader=300):
     opens = []  # (time ms, addr, coin, side)
     for i, addr in enumerate(addrs, 1):
         mine, seen = [], set()
-        for x in hl({"type": "userFillsByTime", "user": addr, "startTime": since, "aggregateByTime": True}) or []:
-            if is_new_position(x):
+        # their LATEST 2000 fills (userFillsByTime from a start date returns the oldest ones, which for busy traders
+        # never reached recent weeks), then only those inside the window
+        for x in hl({"type": "userFills", "user": addr, "aggregateByTime": True}) or []:
+            if x["time"] >= since and is_new_position(x):
                 side = "long" if x["dir"] in ("Open Long", "Short > Long") else "short"
                 key = (x["coin"], side, x["time"] // (H // 2))  # one per half hour, like a 30-min check would see
                 if key not in seen:
@@ -249,7 +291,10 @@ def crypto_samples(n_traders=60, per_trader=300):
         opens += sorted(mine)[-per_trader:]  # cap so one bot doesn't drown out everyone else
         print(f"\r  {i}/{n_traders} traders, {len(opens)} new positions", end="", flush=True)
         time.sleep(5)
-    logged = logged_events()
+    logged = [e for e in logged_events() if e["t"] >= since]
+    # a position the app logged is also in that trader's fills: keep one copy, or the backtest grades trades it trained on
+    seen_live = {(e["addr"], e["coin"], e["side"], (e.get("entered_at") or e["t"]) // H) for e in logged}
+    opens = [o for o in opens if (o[1], o[2], o[3], o[4] // H) not in seen_live and (o[1], o[2], o[3], o[4] // H + 1) not in seen_live]
     # (time the outcome is measured from, trader, coin, side, time the trader actually entered)
     opens += [(e["t"], e["addr"], e["coin"], e["side"], e.get("entered_at") or e["t"]) for e in logged]
     coins = {o[2] for o in opens} | {"BTC"}  # BTC: the whole-market regime for every trade
@@ -283,7 +328,8 @@ def crypto_samples(n_traders=60, per_trader=300):
             feats.update(global_features(world, datetime.fromtimestamp(entered / 1000, timezone.utc).date().isoformat(), side))
             out.append((feats, res[1]))
     # its own closed paper trades, with their REAL results: what it actually won and lost
-    own = [(h["feats"], h["ret"]) for h in load_ledger()["history"] if h.get("feats") and "ret" in h]
+    own = [(h["feats"], h["ret"]) for h in load_ledger()["history"] if h.get("feats") and "ret" in h
+           and datetime.fromisoformat(h["time"]).timestamp() * 1000 >= since]
     print(f"  + {len(own)} of its own closed trades (real wins and losses)", flush=True)
     return out + own
 
@@ -297,19 +343,22 @@ def top_patterns(m, k=20, n=8):
 
 
 def live_stock_record():
-    """Grade every congressional trade the app scored, once a month of trading has passed."""
+    """Grade every stock trade the app scored, once its hold is over: a month for House trades, 10 trading days
+    (~16 calendar days) for company insiders."""
     events = [json.loads(l) for l in STOCK_EVENTS.read_text().splitlines() if l.strip()] if STOCK_EVENTS.exists() else []
+    wait = lambda e: 16 if e.get("src") == "insider" else 35
     ready = [e for e in events if e.get("score") is not None and e.get("v") == SCORING
-             and e["day"] < (date.today() - timedelta(days=35)).isoformat()]
+             and e["day"] < (date.today() - timedelta(days=wait(e))).isoformat()]
     if not ready:
         return {"graded": 0, "n_high": 0, "n_low": 0, "high": "none yet", "low": "none yet", "edge": False}
     bars = daily_closes({e["sym"] for e in ready} | {"SPY"}, min(e["day"] for e in ready),
                         (date.today() - timedelta(days=1)).isoformat())
     spy = bars.get("SPY", [])
     spy_day = {d: i for i, (d, _) in enumerate(spy)}
-    graded = [(e["score"], r) for e in ready
-              if (r := excess_after(bars, spy, spy_day, e["sym"], e["day"], e["kind"] != "Purchase")) is not None]
-    hi, lo = [r for s_, r in graded if s_ >= STRONG], [r for s_, r in graded if s_ < WEAK]
+    graded = [(e.get("tier"), r) for e in ready
+              if (r := excess_after(bars, spy, spy_day, e["sym"], e["day"], e["kind"] != "Purchase",
+                                    insider.HOLD if e.get("src") == "insider" else HOLD_DAYS)) is not None]
+    hi, lo = [r for t, r in graded if t == "strong"], [r for t, r in graded if t == "weak"]
     return {"graded": len(graded), "n_high": len(hi), "n_low": len(lo), "high": summ(hi), "low": summ(lo), "edge": has_edge(hi, lo)}
 
 
@@ -321,8 +370,8 @@ def live_record():
     if not seen:
         return {"graded": 0, "n_high": 0, "n_low": 0, "high": "none yet", "low": "none yet", "edge": False}
     closes = hourly_closes({e["coin"] for e in seen}, min(e["t"] for e in seen) - 26 * H, now)
-    graded = [(e["score"], res[1]) for e in ready if (res := copy_result(closes, e["coin"], e["t"], e["side"]))]
-    hi, lo = [r for s, r in graded if s >= STRONG], [r for s, r in graded if s < WEAK]
+    graded = [(e.get("tier"), res[1]) for e in ready if (res := copy_result(closes, e["coin"], e["t"], e["side"]))]
+    hi, lo = [r for t, r in graded if t == "strong"], [r for t, r in graded if t == "weak"]
     return {"graded": len(graded), "n_high": len(hi), "n_low": len(lo), "high": summ(hi), "low": summ(lo), "edge": has_edge(hi, lo),
             "traders": trader_records(closes, seen)}
 
@@ -352,7 +401,7 @@ def main():
         prev = json.loads(MODEL_FILE.read_text())
     except (OSError, json.JSONDecodeError):
         prev = {}
-    for name, build in (("congress", congress_samples), ("crypto", crypto_samples)):
+    for name, build in (("congress", congress_samples), ("insiders", insider_samples), ("crypto", crypto_samples)):
         try:
             samples = build()
         except Exception as e:  # one market's data failing (e.g. a dropped connection) mustn't throw away the other's
@@ -369,12 +418,14 @@ def main():
         model[name] = {**fit_personal(samples), "validation": v, "validation_personal": vp, "n": len(samples),
                        # score with per-trader models only while they rank trades better than the pooled one
                        "use_personal": vp["spread"] > v["spread"]}
+        model[name]["bars"] = (vp if model[name]["use_personal"] else v)["bars"]
+        print(f"  bars: strong = {model[name]['bars'][1]}+, weak = {model[name]['bars'][0]} or less (its top / bottom 20%)")
         print(f"  scoring with {'per-trader' if model[name]['use_personal'] else 'pooled'} models (better backtest)")
         model[name]["profiles"] = profiles(samples, model[name])
-        if name == "congress":
+        if name in ("congress", "insiders"):
             model[name]["records"] = dict(RECORDS)
         print(f"  per-trader models for {len(model[name]['traders'])} traders. Backtest, per-trader vs pooled:")
-        print(f"    per-trader scored 55+: {vp['high']}\n    per-trader under 45:  {vp['low']}")
+        print(f"    per-trader top 20%:    {vp['high']}\n    per-trader bottom 20%: {vp['low']}")
         print(f"  {G + 'per-trader models show some edge' if vp['edge'] else R + 'per-trader models: no proven edge yet'}{X}")
         for p in model[name]["profiles"]:
             print(f"    {p['trader']}: {p['n']} trades, {p['win']:.0%} won · " + "; ".join(p["style"]))
@@ -384,14 +435,14 @@ def main():
         print(f"\n{B}{name}: learned from {len(samples)} past trades{X}")
         print(f"  Backtest on newest 30% (never seen in training):")
         print(f"    all trades:      {v['all']}")
-        print(f"    scored 55+:      {v['high']}")
-        print(f"    scored under 45: {v['low']}")
+        print(f"    top 20%:         {v['high']}")
+        print(f"    bottom 20%:      {v['low']}")
         print(f"  {G + 'some edge' if v['edge'] else R + 'no proven edge yet'}{X}")
     model["live_stocks"] = ls = keep_on_error(live_stock_record, prev.get("live_stocks"))
     print(f"\n{B}Live track record, stocks{X} ({ls['graded']} graded): STRONG {ls['high']} | WEAK {ls['low']}")
     model["live"] = lv = keep_on_error(live_record, prev.get("live"))
     print(f"\n{B}Live track record{X} ({lv['graded']} scored trades graded)")
-    print(f"    STRONG ({STRONG}+): {lv['high']}\n    WEAK (<{WEAK}):   {lv['low']}")
+    print(f"    STRONG (top 20%): {lv['high']}\n    WEAK (bottom 20%): {lv['low']}")
     print(f"  {G + 'live edge proven - autopilot can unlock' if lv['edge'] else R + 'no live edge yet - autopilot stays locked'}{X}")
     tmp = MODEL_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(model, indent=1))

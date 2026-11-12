@@ -139,7 +139,7 @@
 
   <div data-tab="stocks" hidden>
     <section>
-      <h2>Waiting for you <span class="sub">every House member's trades, newest filings first</span>
+      <h2>Waiting for you <span class="sub">House members and company insiders (SEC Form 4), newest filings first · insider buys disappear 3 days after filing</span>
         <button class="small" id="skipall-stocks" data-skipall="stocks" hidden>Skip all</button></h2>
       <div id="pending-stocks" class="grid"></div>
     </section>
@@ -315,7 +315,7 @@ function modelCard(s, mk) {
       <div><h3>Backtest</h3>${back}</div>
       <div><h3>Live track record</h3>
         <p class="sub">Every scored trade is graded ${crypto ? "24h" : "a month"} later, copied or not. ${lv.graded} graded so far.</p>
-        ${prog(`STRONG (${r.strong}+)`, lv.n_high)}${prog(`WEAK (&lt;${r.weak})`, lv.n_low)}
+        ${prog(x.bars ? `STRONG (top 20%, ${x.bars[1]}+)` : `STRONG (${r.strong}+)`, lv.n_high)}${prog(x.bars ? `WEAK (bottom 20%, ${x.bars[0]} or less)` : `WEAK (&lt;${r.weak})`, lv.n_low)}
         <p>STRONG: ${esc(lv.high)}</p><p>WEAK: ${esc(lv.low)}</p></div>
     </div>${pats}`;
 }
@@ -332,8 +332,8 @@ function autopilotCard(s, mk) {
               : "grows to ×2, ×3, then ×4 once its latest 20, 30, 40 closed trades made money in every block of 10."}
       Each trade is then sized by the model's win chance: ≤50% → ½ size, 60% → normal, 70% → 1½×, 80%+ → 2×, never above 4× the base.</div>`;
   const what = crypto
-    ? "copies crypto trades scored 55+ by itself · max 5 per check · closes by each trader's learned rule, else take profit +6% / stop loss −2% · paper"
-    : "buys congressional purchases scored 55+ by itself · max 5 per check · $1,000 each · sells on take profit +9%, stop loss −3%, after 30 days, or when the member sells · paper";
+    ? "copies STRONG crypto trades (its model's top 20% of scores) by itself · max 5 per check · closes by each trader's learned rule, else take profit +6% / stop loss −2% · paper"
+    : "buys STRONG House and insider purchases (their model's top 20%) by itself · max 5 per check · $1,000 each · sells on take profit +9%, stop loss −3%, after 30 days, or when the member sells · paper";
   const auto = (ap.on
     ? `<span class="pill on">AUTOPILOT ON${ap.forced ? " · EXPERIMENT" : ""}</span> <span class="sub">${what}</span>`
     : ap.resume ? `<span class="pill MIXED">PAUSED BY LOSS GUARD</span> <span class="sub">relearning from its losing trades, then resumes</span>`

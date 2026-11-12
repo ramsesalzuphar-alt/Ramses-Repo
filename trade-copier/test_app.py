@@ -34,9 +34,9 @@ assert A["on"] and A["forced"] and "EXPERIMENT" in app.S["log"][0]["msg"]
 assert not app.ap("stocks")["on"]   # markets are independent
 
 # copies only STRONG crypto, most profitable first, max 5, marked as autopilot trades
-app.S["pending"] = [{"kind": "crypto", "coin": f"C{i}", "title": f"C{i}", "score": 55 + i} for i in range(7)] + \
-                   [{"kind": "crypto", "coin": "WEAK1", "title": "WEAK1", "score": 54},
-                    {"kind": "pelosi", "coin": "NVDA", "title": "NVDA", "side": "buy", "score": 90}]
+app.S["pending"] = [{"kind": "crypto", "coin": f"C{i}", "title": f"C{i}", "score": 55 + i, "tier": "strong"} for i in range(7)] + \
+                   [{"kind": "crypto", "coin": "WEAK1", "title": "WEAK1", "score": 54, "tier": "mid"},
+                    {"kind": "pelosi", "coin": "NVDA", "title": "NVDA", "side": "buy", "score": 90, "tier": "strong"}]
 app.run_autopilot("crypto")
 assert copied == [(f"C{i}", True) for i in (6, 5, 4, 3, 2)], copied
 assert {x["coin"] for x in app.S["pending"]} == {"C0", "C1", "WEAK1", "NVDA"}
@@ -76,9 +76,9 @@ print("crypto autopilot tests pass")
 B = app.ap("stocks")
 assert "locked" in app.set_autopilot(True, m="stocks")
 app.set_autopilot(True, force=True, m="stocks"); assert B["on"] and B["forced"]
-app.S["pending"] = [{"kind": "pelosi", "title": "BUY1", "side": "buy", "score": 70}, {"kind": "pelosi", "title": "BUY2", "side": "buy", "score": 80},
-                    {"kind": "pelosi", "title": "SELL", "side": "sell", "score": 95}, {"kind": "pelosi", "title": "MEH", "side": "buy", "score": 54},
-                    {"kind": "crypto", "coin": "X", "title": "X", "score": 99}]
+app.S["pending"] = [{"kind": "pelosi", "title": "BUY1", "side": "buy", "score": 70, "tier": "strong"}, {"kind": "pelosi", "title": "BUY2", "side": "buy", "score": 80, "tier": "strong"},
+                    {"kind": "pelosi", "title": "SELL", "side": "sell", "score": 95, "tier": "strong"}, {"kind": "pelosi", "title": "MEH", "side": "buy", "score": 54, "tier": "mid"},
+                    {"kind": "crypto", "coin": "X", "title": "X", "score": 99, "tier": "strong"}]
 copied.clear(); A["on"] = False
 app.run_autopilot("stocks")
 assert bought == [("BUY2", True), ("BUY1", True)] and copied == [], (bought, copied)
@@ -97,7 +97,7 @@ hist(+5, +5, +5, +5, +5, +5); assert app.stake("crypto") == 4   # capped at x4
 hist(+5, +5, +5, -1); assert app.stake("crypto") == 1           # latest block lost: back to x1
 ledger["history"] += [{"time": "2099-02-02", "auto": True, "pnl": 0.1}] * 3; assert app.stake("crypto") == 1   # partial block doesn't count
 hist(+5, +5, +5)
-app.S["pending"] = [{"kind": "crypto", "coin": "Z", "title": "Z", "score": 90}]
+app.S["pending"] = [{"kind": "crypto", "coin": "Z", "title": "Z", "score": 90, "tier": "strong"}]
 A["on"], A["forced"] = True, True; stakes.clear()
 app.run_autopilot("crypto")
 assert stakes == [3] and "stake x3" in app.S["log"][0]["msg"], (stakes, app.S["log"][0])
@@ -138,7 +138,7 @@ print("graduation tests pass")
 
 # checks: crypto every time (5 min), congress filings at most every 30 min
 calls = {"congress": 0, "crypto": 0}
-copier.check_pelosi = lambda pending, log: calls.__setitem__("congress", calls["congress"] + 1)
+copier.check_pelosi = lambda pending, log, insiders=False: insiders or calls.__setitem__("congress", calls["congress"] + 1)
 crypto_copier.check_crypto = lambda pending, log: calls.__setitem__("crypto", calls["crypto"] + 1) or []
 app.refresh_accounts = app.security_check = app.graduation = lambda: None
 app.practice = lambda *a, **k: None   # no network in tests (practice books: test_shadow.py)
@@ -155,11 +155,11 @@ assert app.confidence(0.4) == 0.5 and app.confidence(0.6) == 1.0 and abs(app.con
 assert app.confidence(0.95) == 2.0 and app.confidence(None) == 1.0
 A["on"], A["forced"] = True, True
 ledger["history"] = []                                   # no earned stake: x1
-app.S["pending"] = [{"kind": "crypto", "coin": "W", "title": "W", "score": 90, "win": 0.7}]
+app.S["pending"] = [{"kind": "crypto", "coin": "W", "title": "W", "score": 90, "win": 0.7, "tier": "strong"}]
 stakes.clear(); app.run_autopilot("crypto")
 assert stakes == [1.5] and "70% win chance" in app.S["log"][0]["msg"], (stakes, app.S["log"][0])
 hist(+5, +5, +5)                                         # earned x3 ...
-app.S["pending"] = [{"kind": "crypto", "coin": "V", "title": "V", "score": 90, "win": 0.9}]
+app.S["pending"] = [{"kind": "crypto", "coin": "V", "title": "V", "score": 90, "win": 0.9, "tier": "strong"}]
 stakes.clear(); app.run_autopilot("crypto")
 assert stakes == [4], stakes                             # ... x2 confidence would be x6: capped at x4
 print("win-chance sizing tests pass")
