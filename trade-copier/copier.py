@@ -18,6 +18,9 @@ STOCK_EVENTS = HERE / "stock_events.jsonl"  # every congressional trade scored, 
 CONGRESS_CACHE = HERE / "congress_cache.json"  # parsed filings by ID, so learning reads each PDF once
 STOCK_STOP, STOCK_MAX_DAYS = 0.03, 30  # autopilot stock copies: stop loss -3%, close after 30 days (the learned horizon)
 STOCK_TP = 3 * STOCK_STOP  # 3:1 take profit, +9%: applies to every stock copy, yours too
+# autopilot copies of company insiders: held like their model was graded (10 trading days, no take profit); a -3% stop
+# sold small, jumpy stocks within hours on noise, so only a wide safety stop
+INSIDER_RULE = (None, 0.15, 14)
 MODEL_FILE = HERE / "model.json"
 ALPACA = "https://paper-api.alpaca.markets"  # paper only on purpose; never point this at live without a code review
 CLERK = "https://disclosures-clerk.house.gov/public_disc"
@@ -557,7 +560,10 @@ def close_stock(sym, why, sources, log, pos=None):
 
 
 def stock_rule(src):
-    """(take profit, stop loss, max days): every copy takes profit at +9%; autopilot's also stop at -3% and end after 30 days."""
+    """(take profit, stop loss, max days): every copy takes profit at +9%; autopilot's also stop at -3% and end after
+    30 days, except copies of company insiders (INSIDER_RULE)."""
+    if is_auto(src) and (src.get("feats") or {}).get("source") == "company insider":
+        return INSIDER_RULE
     return (STOCK_TP, STOCK_STOP, STOCK_MAX_DAYS) if is_auto(src) else (STOCK_TP, None, None)
 
 
@@ -578,7 +584,7 @@ def stock_exits(log):
             continue
         tp, sl, days = stock_rule(src)
         r = float(p["unrealized_plpc"])
-        why = ("Take profit" if r >= tp else "Stop loss" if sl and r <= -sl else
+        why = ("Take profit" if tp and r >= tp else "Stop loss" if sl and r <= -sl else
                "Time limit" if days and now - datetime.fromisoformat(src["opened"]) >= timedelta(days=days) else None)
         if why:
             changed |= close_stock(sym, f"{why} hit ({r:+.1%})", sources, log, p) is not None

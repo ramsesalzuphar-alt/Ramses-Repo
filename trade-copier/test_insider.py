@@ -50,3 +50,9 @@ assert copier.member_gate(m, "Loser", 50, [], proven_only=False) is None
 print("insider tests pass")
 assert insider.tradable("AAPL") and insider.tradable("BRK.B") and not insider.tradable("AB-LEND") and not insider.tradable("") and not insider.tradable("TOOLONG")
 print("ticker filter tests pass")
+
+# exits: insider autopilot copies are held 2 weeks (no take profit, -15% safety stop); House and your own copies unchanged
+assert copier.stock_rule({"auto": True, "feats": {"source": "company insider"}}) == (None, 0.15, 14)
+assert copier.stock_rule({"auto": True, "feats": {"source": "House member"}}) == (copier.STOCK_TP, copier.STOCK_STOP, copier.STOCK_MAX_DAYS)
+assert copier.stock_rule({"auto": False, "feats": {"source": "company insider"}}) == (copier.STOCK_TP, None, None)
+print("insider exit rule tests pass")
