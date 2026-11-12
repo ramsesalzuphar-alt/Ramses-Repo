@@ -134,7 +134,7 @@ def history(today=None):
 
 def tradable(sym):
     """A plain stock ticker (AAPL, BRK.B), not a note, unit or private-fund name like AB-LEND that Alpaca refuses."""
-    return bool(re.fullmatch(r"[A-Z]{1,5}(\.[A-Z])?", sym))
+    return bool(re.fullmatch(r"[A-Z]{1,5}(\.[A-Z])?", sym)) and sym not in ("NONE", "NA", "N")  # 'no ticker' placeholders
 
 
 def iso(us):

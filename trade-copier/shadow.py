@@ -16,7 +16,8 @@ STRATEGIES = {  # name -> (tiers taken: each model's top 20% = strong, bottom 20
     "Not weak (top 80%)": (("strong", "mid"), True, False),
     "Strong, fixed exits": (("strong",), False, False),
     "Scout finds only, strong": (("strong",), True, True),
-}
+    "Strong, held 24h (as graded)": (("strong",), "24h", False),  # the model learned 24h holds; copies of fast traders
+}                                                                  # close within minutes when they exit: which pays?
 
 
 def load():
@@ -46,7 +47,8 @@ def open_new(items, scouted, now=None):
                 continue
             book[name]["open"][key] = {"addr": x["addr"], "coin": x["coin"], "side": x["side"], "entry": x["price_now"],
                                        "opened": now.isoformat(timespec="seconds"), "score": x["score"],
-                                       "exit": cc.scout_exit(x["addr"]) if learned else None}
+                                       "exit": cc.scout_exit(x["addr"]) if learned is True else None,
+                                       "hold": 24 if learned == "24h" else None}
     save(book)
 
 
@@ -63,10 +65,13 @@ def update(mids, holdings=None, now=None):
             r = (px / p["entry"] - 1) * (1 if p["side"] == "long" else -1)
             tp, sl, mh = cc.rule_of({"auto": True, "exit": p.get("exit")})
             age = now - datetime.fromisoformat(p["opened"])
-            why = ("take profit" if tp and r >= tp else "stop loss" if sl and r <= -sl else
-                   "time limit" if mh and age >= timedelta(hours=mh) else
-                   "trader exited" if holdings and p["addr"] in holdings and holdings[p["addr"]].get(p["coin"]) != p["side"] else
-                   "3-day limit" if age >= timedelta(hours=MAX_HOURS) else None)
+            if p.get("hold"):  # held exactly as the model was graded: no rule, no following the trader
+                why = "24h hold" if age >= timedelta(hours=p["hold"]) else None
+            else:
+                why = ("take profit" if tp and r >= tp else "stop loss" if sl and r <= -sl else
+                       "time limit" if mh and age >= timedelta(hours=mh) else
+                       "trader exited" if holdings and p["addr"] in holdings and holdings[p["addr"]].get(p["coin"]) != p["side"] else
+                       "3-day limit" if age >= timedelta(hours=MAX_HOURS) else None)
             if why:
                 ret = r - 2 * cc.FEE
                 b["closed"].append({"time": now.isoformat(timespec="seconds"), "coin": p["coin"], "side": p["side"],

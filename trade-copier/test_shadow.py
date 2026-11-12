@@ -37,3 +37,13 @@ app.graduation()
 names = {r["name"]: r for r in app.S["grad"]}
 assert {f"Practice: {k}" for k in shadow.STRATEGIES} <= set(names) and names["Practice: Strong (the autopilot's rule)"]["n"] == 1, list(names)
 print("practice strategy tests pass")
+
+# the 24h book ignores the trader's exit and its rule: it closes only after 24 hours, like the model was graded
+shadow.FILE.unlink()
+shadow.open_new([item("S", "SOL", "short", "strong")], scouted=set(), now=t0)
+shadow.update({"SOL": "90"}, holdings={"S": {}}, now=t0 + timedelta(hours=1))   # trader left, +10%: others close
+assert shadow.trades()["Strong, held 24h (as graded)"] == ([], 1) and len(shadow.trades()["Strong (the autopilot's rule)"][0]) == 1
+shadow.update({"SOL": "95"}, now=t0 + timedelta(hours=24))
+c = shadow.trades()["Strong, held 24h (as graded)"][0]
+assert len(c) == 1 and c[0]["why"] == "24h hold" and abs(c[0]["ret"] - (0.05 - 2 * cc.FEE)) < 1e-9
+print("24h book tests pass")

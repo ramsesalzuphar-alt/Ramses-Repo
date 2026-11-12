@@ -69,3 +69,4 @@ assert copier.decide_pelosi(_buy, auto=True).startswith("Done") and len(_placed)
 assert "not bought again" in copier.decide_pelosi({**_buy, "trade": {**_buy["trade"], "Representative": "Roe Ann"}}, auto=True) and len(_placed) == 1
 assert copier.decide_pelosi(_buy).startswith("Done") and len(_placed) == 2
 print("buy-once tests pass")
+assert not insider.tradable("NONE") and insider.tradable("NOW")
