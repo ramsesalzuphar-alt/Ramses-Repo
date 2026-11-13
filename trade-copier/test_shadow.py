@@ -47,3 +47,11 @@ shadow.update({"SOL": "95"}, now=t0 + timedelta(hours=24))
 c = shadow.trades()["Strong, held 24h (as graded)"][0]
 assert len(c) == 1 and c[0]["why"] == "24h hold" and abs(c[0]["ret"] - (0.05 - 2 * cc.FEE)) < 1e-9
 print("24h book tests pass")
+
+# weekdays-only book: takes strong trades Monday-Friday, skips weekends
+shadow.FILE.unlink()
+shadow.open_new([item("S", "SOL", "short", "strong")], scouted=set(), now=datetime(2026, 11, 14, 12))   # a Saturday
+assert shadow.trades()["Strong, weekdays only"] == ([], 0) and shadow.trades()["Strong (the autopilot's rule)"] == ([], 1)
+shadow.open_new([item("S", "ETH", "long", "strong")], scouted=set(), now=datetime(2026, 11, 16, 12))   # a Monday
+assert shadow.trades()["Strong, weekdays only"] == ([], 1)
+print("weekday book tests pass")

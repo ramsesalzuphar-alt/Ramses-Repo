@@ -16,7 +16,8 @@ STRATEGIES = {  # name -> (tiers taken: each model's top 20% = strong, bottom 20
     "Not weak (top 80%)": (("strong", "mid"), True, False),
     "Strong, fixed exits": (("strong",), False, False),
     "Scout finds only, strong": (("strong",), True, True),
-    "Strong, held 24h (as graded)": (("strong",), "24h", False),  # the model learned 24h holds; copies of fast traders
+    "Strong, held 24h (as graded)": (("strong",), "24h", False),
+    "Strong, weekdays only": (("strong",), True, False, "weekdays"),  # backtest: weekend copies were weaker every period  # the model learned 24h holds; copies of fast traders
 }                                                                  # close within minutes when they exit: which pays?
 
 
@@ -42,8 +43,10 @@ def open_new(items, scouted, now=None):
         if x.get("kind") != "crypto" or not x.get("price_now"):
             continue
         key = f"{x['addr']}:{x['coin']}:{x['side']}"
-        for name, (tiers, learned, scout_only) in STRATEGIES.items():
+        for name, (tiers, learned, scout_only, *only) in STRATEGIES.items():
             if x.get("tier") not in tiers or (scout_only and x["addr"] not in scouted) or key in book[name]["open"]:
+                continue
+            if only == ["weekdays"] and now.weekday() >= 5:
                 continue
             book[name]["open"][key] = {"addr": x["addr"], "coin": x["coin"], "side": x["side"], "entry": x["price_now"],
                                        "opened": now.isoformat(timespec="seconds"), "score": x["score"],
