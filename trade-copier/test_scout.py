@@ -123,17 +123,17 @@ r = scout.learn_exit(flip, steady_spikes, 1000 * H)
 assert r and r["name"] == "TP 6% / SL 2%" and r["n"] == 20, r   # judged on the 20 newer copies it never saw
 print("holdout tests pass")
 
-# end to end: an autopilot copy of a scouted trader carries that trader's learned rule, and target_exits uses it
+# end to end: your copy of a scouted trader carries that trader's learned rule, and target_exits uses it
 cc.SCOUT_FILE.write_text(json.dumps({"traders": {"T": {"v": cc.SCOUT_VERSION, "exit": {"name": "their habit", "tp": 0.04, "sl": 0.01, "max_h": 5}}}}))
 L = {"cash": 1000, "positions": {}, "history": [], "start": 1000}
 cc.load_ledger, cc.save_ledger = (lambda: L), (lambda l: None)
 cc.positions = lambda a: {"ETH": "long"}
 cc.hl = lambda body: {"ETH": "100"}
-msg = cc.decide_crypto({"coin": "ETH", "side": "long", "addr": "T"}, auto=True)
+msg = cc.decide_crypto({"coin": "ETH", "side": "long", "addr": "T"})
 assert "close rule: their habit" in msg and L["positions"]["ETH"]["exit"]["tp"] == 0.04, msg
 msgs = []; cc.target_exits(L, {"ETH": "104.5"}, msgs.append)
 assert "Take profit" in msgs[0] and not L["positions"], msgs     # +4.5% closes under ITS rule (the default needs +6%)
-cc.decide_crypto({"coin": "ETH", "side": "long", "addr": "T"})    # your own copy: the same learned rule
+cc.decide_crypto({"coin": "ETH", "side": "long", "addr": "T"})    # again: the same learned rule
 assert L["positions"]["ETH"]["exit"]["tp"] == 0.04
 del L["positions"]["ETH"]
 cc.decide_crypto({"coin": "ETH", "side": "long", "addr": "U"})    # a trader with no learned rule: none
@@ -174,3 +174,19 @@ except Stop:
     pass
 assert saved and set(saved[0]) == {"new", "old"} and saved[0]["new"]["v"] == sc.SCOUT_VERSION, saved
 print("scout loop tests pass")
+
+# autopilot copies are held 24h: no take profit, only a -10% safety stop, and not closed when the trader exits
+assert cc.rule_of({"auto": True, "hold": 24, "exit": p["exit"]}) == (None, cc.HOLD_STOP, 24)
+L = {"cash": 1000, "positions": {}, "history": [], "start": 1000}
+cc.load_ledger = lambda: L
+cc.positions = lambda a: {"ETH": "long"}
+cc.hl = lambda body: {"ETH": "100"}
+cc.decide_crypto({"coin": "ETH", "side": "long", "addr": "T"}, auto=True)
+assert L["positions"]["ETH"]["hold"] == 24
+msgs = []; cc.auto_exits(L, {"T": {}}, {"ETH": "101"}, msgs.append)        # the trader left: the autopilot copy stays
+assert "ETH" in L["positions"] and not msgs
+cc.target_exits(L, {"ETH": "109"}, msgs.append); assert "ETH" in L["positions"]   # +9%: no take profit while held
+cc.target_exits(L, {"ETH": "89"}, msgs.append); assert "ETH" not in L["positions"] and "Stop loss" in msgs[0]   # -11%: safety stop
+cc.decide_crypto({"coin": "ETH", "side": "long", "addr": "T"})            # your own copy: no hold, follows the trader
+assert "hold" not in L["positions"]["ETH"]
+print("24h autopilot hold tests pass")

@@ -18,6 +18,9 @@ SCOUT_FILE = HERE / "scout.json"  # written by scout.py: every scanned trader's 
 SCOUT_VERSION = 2  # bump when the scout's rules change: older verdicts are ignored and rescanned first
 WATCH_MAX = 30
 MAJORS = {"BTC", "ETH", "SOL"}
+# autopilot copies are held 24 hours (how the model is graded): live, the strong picks made money held that long
+# and lost when they followed fast traders out within minutes. -10% safety stop against a crash.
+AUTO_HOLD_H, HOLD_STOP = 24, 0.10
 FEE = 0.00045  # Hyperliquid base taker fee per side
 STOP_LOSS = 0.02  # return on the position (1x, so = price move); autopilot trades only. If changed, update index.html's text
 TAKE_PROFIT = 3 * STOP_LOSS  # 3:1; applies to every copy, yours too
@@ -288,6 +291,8 @@ def auto_exits(ledger, holdings, mids, log):
     """Close every copy whose source trader no longer holds that coin on that side. Catches missed exits too."""
     for coin, p in list(ledger["positions"].items()):
         src = p.get("source")
+        if p.get("hold"):
+            continue  # held its 24 hours whatever the trader does
         if src in holdings and holdings[src].get(coin) != p["side"] and coin in mids:
             pnl = close_pos(ledger, coin, float(mids[coin]))
             log(f"Auto-closed {p['side']} {coin}: {short_addr(src)} exited ({money(pnl)} after fees)")
@@ -311,6 +316,8 @@ def entry_times(addr):
 def rule_of(p):
     """(take profit, stop loss, max hours) of a copy. Every copy uses the close rule the scout learned for its trader,
     if it found one that held up on copies it never saw. Otherwise: autopilot's 3:1 default; your own copies only take profit."""
+    if p.get("hold"):  # autopilot copies: held like the model was graded, with only a wide safety stop
+        return None, HOLD_STOP, p["hold"]
     r = p.get("exit")
     if r:
         return r.get("tp"), r.get("sl"), r.get("max_h")
@@ -508,6 +515,8 @@ def decide_crypto(item, auto=False, stake=1, limit=None, qty=None):
         dollars = px * qty
     rule = scout_exit(item["addr"])  # each copy closes by its trader's learned rule, if the scout found one
     open_pos(ledger, coin, side, dollars, px, item["addr"], item.get("feats"), auto, rule)
+    if auto:
+        ledger["positions"][coin]["hold"] = AUTO_HOLD_H
     save_ledger(ledger)
     return f"Copied: {side} ${dollars:,.2f} of {coin} at ${px:,.6g}" + (f" · close rule: {rule['name']}" if rule else "")
 
