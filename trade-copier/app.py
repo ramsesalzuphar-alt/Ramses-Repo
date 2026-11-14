@@ -5,6 +5,7 @@ Relearns every 6 hours. Each market (crypto, stocks) has its own autopilot that 
 once that market's live track record proves an edge, or runs as a paper experiment if you start it.
 """
 import json, os, threading, time, traceback
+from collections import Counter
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,7 +20,8 @@ last_congress = 0.0
 # relearn schedules: crypto's patterns change within weeks and new trades are graded every hour, so every 2 hours;
 # stocks get new data about once a day (filings; insider copies graded 10 trading days later)
 RETRAIN_EVERY = {("crypto",): 2 * 3600, ("congress", "insiders"): 24 * 3600}
-AUTO_MAX_PER_CHECK = 20  # autopilot copies up to 20 strong trades per 5-minute check
+AUTO_MAX_PER_CHECK = 20
+MAX_SAME_SIDE = 5  # crypto autopilot: at most 5 open copies long and 5 short (strong picks bunch up in one direction)  # autopilot copies up to 20 strong trades per 5-minute check
 EXPIRE_AFTER = 10 * 60  # seconds a crypto trade waits for you
 INSIDER_EXPIRE = 3 * 86400  # seconds after filing a company insider's buy waits for you
 MARKETS = ("crypto", "stocks")
@@ -259,7 +261,11 @@ def run_autopilot(m):
     mine = (lambda x: x["kind"] == "crypto") if m == "crypto" else (lambda x: x["kind"] == "pelosi" and x["side"] == "buy")
     strong = sorted((x for x in S["pending"] if mine(x) and x.get("tier") == "strong"), key=lambda x: -x["score"])  # its model's top 20%
     x = stake(m)
+    held = Counter(p["side"] for p in crypto_copier.load_ledger()["positions"].values() if p.get("auto")) if m == "crypto" else Counter()
     for item in strong[:AUTO_MAX_PER_CHECK]:
+        if m == "crypto" and held[item.get("side")] >= MAX_SAME_SIDE:
+            continue  # enough bets on this market direction already: one market move mustn't decide everything
+        held[item.get("side")] += 1
         S["pending"].remove(item)
         size = min(STAKE_MAX, x * confidence(item.get("win")))  # earned stake x confidence, never above x4 the base size
         why = []

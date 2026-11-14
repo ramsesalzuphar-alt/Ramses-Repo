@@ -204,3 +204,13 @@ print("relearn schedule tests pass")
 _mf.write_text(_j.dumps({"trained": ago(0), "crypto": {"trained": ago(0)}, "congress": {}, "insiders": {"trained": ago(1)}}))
 assert app.retrain_due() == ("congress", "insiders")
 print("stale stock model tests pass")
+
+# crypto autopilot holds at most MAX_SAME_SIDE open copies per direction
+ledger["positions"] = {f"L{i}": {"side": "long", "auto": True} for i in range(4)}
+copied.clear(); A["on"], A["forced"] = True, True
+app.S["pending"] = [{"kind": "crypto", "coin": f"N{i}", "title": f"N{i}", "side": "long", "score": 70 + i, "tier": "strong"} for i in range(3)] + \
+                   [{"kind": "crypto", "coin": "S1", "title": "S1", "side": "short", "score": 60, "tier": "strong"}]
+app.run_autopilot("crypto")
+assert [c for c, _ in copied] == ["N2", "S1"], copied   # 4 longs held + 1 = 5: one more long only; the short is free
+ledger["positions"] = {}
+print("same-side limit tests pass")
