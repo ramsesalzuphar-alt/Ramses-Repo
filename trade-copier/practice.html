@@ -98,6 +98,7 @@ const cls = x => x > 0 ? "up" : x < 0 ? "down" : "";
 const COLS = [
   ["name", "Strategy"], ["n", "Closed", "r"], ["open", "Open", "r"], ["win", "Won", "r"], ["avg", "Avg / trade", "r"],
   ["net", "Net", "r"], ["curve", "Money curve"], ["days", "Days", "r"], ["passed", "Graduation tests"],
+  ["rnet", "Blind replay (30 days)", "r"], ["rpassed", "Replay tests"],
 ];
 let sortKey = "net", sortDir = -1, data = null, known = null, prevN = {}, fresh = {}, changes = [];
 try { const s = JSON.parse(localStorage.getItem("tourney-sort")); if (s) [sortKey, sortDir] = s; } catch (e) {}
@@ -124,7 +125,7 @@ function track(list) {
   $("changes").innerHTML = changes.map(c => `<div class="change ${c.add ? "add" : "rem"}">${c.at} · ${c.add ? "Added" : "Removed"}: <b>${esc(c.name)}</b>${c.add ? " (it starts practicing on the next crypto proposal)" : " (its book is no longer traded)"}</div>`).join("");
 }
 
-function tiles(list, promoted) {
+function tiles(list, promoted, made) {
   const traded = list.filter(s => s.n), best = [...traded].sort((a, b) => b.net - a.net)[0];
   const grads = list.filter(s => s.ok), open = list.reduce((a, s) => a + s.open, 0), closed = list.reduce((a, s) => a + s.n, 0);
   const near = [...list].sort((a, b) => Object.values(b.checks).filter(Boolean).length - Object.values(a.checks).filter(Boolean).length || b.net - a.net)[0];
@@ -134,13 +135,20 @@ function tiles(list, promoted) {
     t("Leading", best ? usd(best.net) : "–", best ? esc(best.name) : "no closed trades yet", best ? cls(best.net) : "") +
     t("Closest to graduating", near ? `${Object.values(near.checks).filter(Boolean).length} / 5` : "–", near ? esc(near.name) : "") +
     t("Graduated", grads.length, grads.length ? esc(grads.map(s => s.name).join(", ")) : "needs 50+ trades over 30+ days", grads.length ? "up" : "") +
-    t("Autopilot follows", promoted ? "Promoted" : "Its own rule", promoted ? esc(promoted) : "strong picks, 24h holds (until one graduates)");
+    t("Autopilot follows", promoted.length ? `${promoted.length} graduate${promoted.length > 1 ? "s" : ""}` : "Its own rule",
+      promoted.length ? esc(promoted.join(", ")) : "strong picks, 24h holds (until strategies graduate)") +
+    t("Blind replay", made ? `${list.filter(s => s.replay && s.replay.ok).length} pass` : "running…",
+      made ? `all 5 tests on blind past trades (about 2 weeks reachable so far) · made ${new Date(made).toLocaleString()}` : "first replay takes about half an hour", list.some(s => s.replay && s.replay.ok) ? "up" : "");
 }
 
 function render() {
   if (!data) return;
   const list = data.strategies, q = $("q").value.toLowerCase(), show = $("show").value;
-  for (const s of list) s.passed = Object.values(s.checks).filter(Boolean).length;
+  for (const s of list) {
+    s.passed = Object.values(s.checks).filter(Boolean).length;
+    s.rnet = s.replay ? s.replay.net : null;
+    s.rpassed = s.replay ? Object.values(s.replay.checks).filter(Boolean).length : null;
+  }
   const rows = list.filter(s => (!q || `${s.name} ${s.exit} ${s.filter} ${s.tiers}`.toLowerCase().includes(q))
       && (show === "all" || (show === "traded" && s.n) || (show === "tourney" && s.name.startsWith("Tourney")) || (show === "named" && !s.name.startsWith("Tourney"))))
     .sort((a, b) => {
@@ -155,7 +163,7 @@ function render() {
         const isNew = fresh[s.name] && Date.now() - fresh[s.name] < 15 * 60e3, moved = prevN[s.name] != null && prevN[s.name] !== s.n;
         const name = s.name.replace(/^Tourney: /, "");
         return `<tr class="${moved ? "flash" : ""}">
-          <td><div class="name">${esc(name)} ${isNew ? '<span class="pill new">NEW</span>' : ""}${s.ok ? ' <span class="pill grad">GRADUATED</span>' : ""}${s.promoted ? ' <span class="pill prom">AUTOPILOT USES THIS</span>' : ""}</div>
+          <td><div class="name">${esc(name)} ${isNew ? '<span class="pill new">NEW</span>' : ""}${s.ok ? ' <span class="pill grad">GRADUATED</span>' : ""}${s.fast && !s.ok ? ' <span class="pill grad">FAST-TRACKED</span>' : ""}${s.promoted ? ' <span class="pill prom">AUTOPILOT USES THIS</span>' : ""}</div>
               <div class="rule">${esc(s.tiers.join(" + "))} picks · ${esc(s.exit)} · ${esc(s.filter)}</div></td>
           <td class="r">${s.n}</td><td class="r">${s.open}</td>
           <td class="r">${s.win == null ? "–" : Math.round(s.win * 100) + "%"}</td>
@@ -164,9 +172,12 @@ function render() {
           <td>${spark(s.curve)}</td>
           <td class="r">${s.days}</td>
           <td><span class="checks" title="${esc(tests.map(t => `${s.checks[t] ? "✓" : "✗"} ${t}`).join("\n"))}">${tests.map(t => `<i class="${s.checks[t] ? "ok" : ""}"></i>`).join("")}</span>
-              <span class="muted">${s.passed}/5</span></td></tr>`;
+              <span class="muted">${s.passed}/5</span></td>
+          <td class="r">${s.replay ? `<span class="${cls(s.replay.net)}">${usd(s.replay.net)}</span> <span class="muted">· ${s.replay.n} · ${pct(s.replay.avg)}</span>` : '<span class="muted">not replayed</span>'}</td>
+          <td>${s.replay ? `<span class="checks" title="${esc(tests.map(t => `${s.replay.checks[t] ? "✓" : "✗"} ${t}`).join("\n"))}">${tests.map(t => `<i class="${s.replay.checks[t] ? "ok" : ""}"></i>`).join("")}</span>
+              <span class="muted">${s.rpassed}/5</span>` : ""}</td></tr>`;
       }).join("") : `<tr><td colspan="${COLS.length}" class="empty">No strategies match.</td></tr>`);
-  $("foot").textContent = `Graduating needs all five: ${tests.join(" · ")}. Hover the squares to see which pass. A graduate is promoted to the crypto autopilot (paper only); real money still needs your review.`;
+  $("foot").textContent = `Graduating needs all five: ${tests.join(" · ")}. Fast track: passes all five on the blind replay (each day scored by a model that never saw it), then confirms live with 20+ trades over 7+ days averaging +0.5%. Every graduate trades for the crypto autopilot at once (paper only); real money still needs the full live graduation and your review. Hover the squares to see which tests pass.`;
   prevN = Object.fromEntries(list.map(s => [s.name, s.n]));
 }
 
@@ -187,7 +198,7 @@ async function load() {
     if (!r.ok) throw new Error(r.status);
     data = await r.json();
     track(data.strategies);
-    tiles(data.strategies, data.promoted);
+    tiles(data.strategies, data.promoted || [], data.replay_made);
     render();
     $("dot").className = "dot";
     $("updated").textContent = `live · updated ${new Date().toLocaleTimeString()}`;

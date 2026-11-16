@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import copier, crypto_copier, learn, scout, shadow
+import copier, crypto_copier, learn, replay, scout, shadow
 copier.load_env()  # .env settings (trade sizes) before the first page load
 
 HERE = Path(__file__).parent
@@ -38,11 +38,12 @@ saved = json.loads(APP_FILE.read_text()) if APP_FILE.exists() else {}
 if "ap" not in saved and "autopilot" in saved:  # state saved before stocks had an autopilot: it was crypto's
     saved["ap"] = {"crypto": {"on": saved["autopilot"], "forced": saved.get("forced", False), "guard_since": saved.get("guard_since", ""),
                               "guard_trips": saved.get("guard_trips", []), "resume": saved.get("resume_after_retrain", False)}}
-S = {"pending": [], "log": [], "traders": [], "last_check": None, "security": [], "graduates": [], "grad": [], "promoted": None, **{k: v for k, v in saved.items() if k in KEEP},
+S = {"pending": [], "log": [], "traders": [], "last_check": None, "security": [], "graduates": [], "grad": [], "promoted": [], **{k: v for k, v in saved.items() if k in KEEP},
      "crypto": None, "stocks": None, "next_check": None, "checking": False, "error": None, "training": False,
      "model": None, "auto": {}, "scout": None, "accounts_at": None}
 S["ap"] = {m: {**NEW_AP, **S.get("ap", {}).get(m, {})} for m in MARKETS}
 snapshot = b"{}"
+S["promoted"] = [S["promoted"]] if isinstance(S["promoted"], str) else S["promoted"] or []  # saved when only one could be promoted
 
 
 def ap(m):
@@ -61,6 +62,8 @@ def closed_trades(m):
 
 
 GRAD_TRADES, GRAD_DAYS, GRAD_AVG = 50, 30, 0.005  # graduation: 50+ closed paper trades over 30+ days averaging +0.5%+
+FAST_N, FAST_DAYS = 20, 7  # fast track: passes every test on its blind 30-day replay, then confirms live: 20+ trades, 7+ days, avg +0.5%+
+REPLAY_EVERY = 24 * 3600
 
 
 def grade(trades):
@@ -104,7 +107,7 @@ def graduation():
             if who(h):
                 by.setdefault(who(h), []).append(h)
         rows += [{"name": f"{m.title()}: copy {k}", "market": m, **grade(v)} for k, v in by.items() if len(v) >= 10]
-    rows += [{"name": f"Practice: {k}", "market": "crypto", "open": n_open, **grade(closed)}
+    rows += [{"name": f"Practice: {k}", "market": "crypto", "open": n_open, **fast_track(k, closed)}
              for k, (closed, n_open) in shadow.trades().items()]  # practice strategies, graded the same way
     now = {r["name"] for r in rows if r["ok"]}
     for name in sorted(now - set(S["graduates"])):
@@ -113,13 +116,48 @@ def graduation():
     for name in sorted(set(S["graduates"]) - now):
         log(f"'{name}' lost its graduation: its recent paper trades no longer pass every test.")
     S["graduates"] = sorted(now)
-    best = max((r for r in rows if r["ok"] and r["name"].startswith("Practice: ")), key=lambda r: r["avg"], default=None)
-    promoted = best["name"][len("Practice: "):] if best else None
-    if promoted != S["promoted"]:
-        log(f"Crypto autopilot now trades by the graduated practice strategy '{promoted}' (paper only)" if promoted
-            else "Crypto autopilot back to its own rule (strong picks, 24h holds): no practice strategy passes every test now")
+    # every practice strategy that graduated (fully, or by fast track) trades for the autopilot at once, best avg first
+    promoted = [r["name"][len("Practice: "):] for r in sorted(rows, key=lambda r: -r["avg"])
+                if r["name"].startswith("Practice: ") and (r["ok"] or r.get("fast"))]
+    for k in promoted:
+        if k not in S["promoted"]:
+            log(f"Crypto autopilot now also trades by the graduated practice strategy '{k}' (paper only)")
+    for k in S["promoted"]:
+        if k not in promoted:
+            log(f"Crypto autopilot stopped using '{k}': it no longer passes")
+    if S["promoted"] and not promoted:
+        log("Crypto autopilot back to its own rule (strong picks, 24h holds)")
     S["promoted"] = promoted
     S["grad"] = sorted(rows, key=lambda r: (-r["ok"], -sum(r["checks"].values()), -r["n"]))[:40]
+
+
+def fast_track(name, closed):
+    """A practice strategy's live grade, its blind replay grade, and whether it graduates by fast track: its blind
+    replay trades from before its first live trade plus its live trades, as one record, pass every test (so the
+    30 days can start in the past), AND it confirms live (FAST_N+ trades over FAST_DAYS+ days, avg +0.5%+, in profit).
+    Fast track only promotes it to the paper autopilot; real money still needs the full live graduation."""
+    live, rp = grade(closed), replay.load()["strategies"].get(name)
+    g = grade(rp) if rp is not None else None
+    before = [h for h in rp or [] if not closed or h["time"] < closed[0]["time"]]
+    both = grade(before + closed) if rp is not None else None
+    fast = bool(both and both["ok"] and live["n"] >= FAST_N and live["days"] >= FAST_DAYS and live["avg"] >= GRAD_AVG and live["net"] > 0)
+    return {**live, "replay": g and {k: g[k] for k in ("n", "days", "avg", "net", "checks", "ok")}, "fast": fast}
+
+
+def replay_daily():
+    """Re-run the blind 30-day replay once a day, in the background (about half an hour of gentle Hyperliquid reads)."""
+    while True:
+        try:
+            if not replay.FILE.exists() or time.time() - replay.FILE.stat().st_mtime > REPLAY_EVERY:
+                data = replay.run()
+                tmp = replay.FILE.with_suffix(".tmp")
+                tmp.write_text(json.dumps(data))
+                os.replace(tmp, replay.FILE)
+                log(f"Blind replay done: {len(data['strategies'])} practice strategies replayed over the last 30 days "
+                    f"({data['positions']} real positions, each day scored by a model that never saw it)")
+        except Exception:
+            traceback.print_exc()
+        time.sleep(3600)
 
 
 def practice_board():
@@ -137,8 +175,9 @@ def practice_board():
                     "filter": {"with": "with BTC's week", "against": "against BTC's week", "weekdays": "weekdays only"}.get(
                         only[0] if only else None, "scout finds only" if scout_only else "any market"),
                     "win": sum(h["pnl"] > 0 for h in closed) / len(closed) if closed else None,
-                    "curve": curve[-150:], "last": closed[-1] if closed else None, "promoted": name == S["promoted"], **grade(closed)})
-    return {"strategies": out, "promoted": S["promoted"], "time": datetime.now().isoformat(timespec="seconds")}
+                    "curve": curve[-150:], "last": closed[-1] if closed else None, "promoted": name in S["promoted"],
+                    **fast_track(name, closed)})
+    return {"strategies": out, "promoted": S["promoted"], "replay_made": replay.load()["made"], "time": datetime.now().isoformat(timespec="seconds")}
 
 
 def stake(m):
@@ -284,12 +323,12 @@ def run_autopilot(m):
     if not (a["on"] and (a["forced"] or unlocked(m))):
         return
     mine = (lambda x: x["kind"] == "crypto") if m == "crypto" else (lambda x: x["kind"] == "pelosi" and x["side"] == "buy")
-    rule = S["promoted"] if m == "crypto" and S["promoted"] in shadow.STRATEGIES else None  # a graduated practice strategy
-    scouted, now = ({a for a, _, _ in crypto_copier.watchlist()} if rule else set()), datetime.now()
-    takes = (lambda x: shadow.takes(rule, x, scouted, now)) if rule else (lambda x: x.get("tier") == "strong")  # its model's top 20%
+    rules = [k for k in S["promoted"] if k in shadow.STRATEGIES] if m == "crypto" else []  # graduated practice strategies
+    scouted, now = ({a for a, _, _ in crypto_copier.watchlist()} if rules else set()), datetime.now()
+    # each proposal is taken by the first (best) graduated strategy that would take it, and exits by that strategy's rule
+    rule_for = lambda x: next((k for k in rules if shadow.takes(k, x, scouted, now)), None)
+    takes = (lambda x: rule_for(x) is not None) if rules else (lambda x: x.get("tier") == "strong")  # its model's top 20%
     strong = sorted((x for x in S["pending"] if mine(x) and takes(x)), key=lambda x: -x["score"])
-    hold = shadow.hold_of(rule) if rule else crypto_copier.AUTO_HOLD_H
-    quick = bool(rule) and shadow.quick(rule)
     x = stake(m)
     held = Counter(p["side"] for p in crypto_copier.load_ledger()["positions"].values() if p.get("auto")) if m == "crypto" else Counter()
     for item in strong[:AUTO_MAX_PER_CHECK]:
@@ -297,6 +336,8 @@ def run_autopilot(m):
             continue  # enough bets on this market direction already: one market move mustn't decide everything
         held[item.get("side")] += 1
         S["pending"].remove(item)
+        rule = rule_for(item)
+        hold, quick = (shadow.hold_of(rule), shadow.quick(rule)) if rule else (crypto_copier.AUTO_HOLD_H, False)
         size = min(STAKE_MAX, x * confidence(item.get("win")))  # earned stake x confidence, never above x4 the base size
         why = []
         if x > 1:
@@ -617,6 +658,7 @@ if __name__ == "__main__":
         import ctypes
         ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
     threading.Thread(target=loop, daemon=True).start()
+    threading.Thread(target=replay_daily, daemon=True).start()
     threading.Thread(target=scout.run, args=(scout_log,), daemon=True).start()  # nonstop search for consistent traders
     print(f"Trade Copier running at http://127.0.0.1:{PORT}  (Ctrl+C to stop)")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

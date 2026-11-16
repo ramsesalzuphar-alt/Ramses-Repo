@@ -31,3 +31,5 @@ insider_cache.tmp
 insider_seen.json
 
 __pycache__/
+replay.json
+replay.tmp

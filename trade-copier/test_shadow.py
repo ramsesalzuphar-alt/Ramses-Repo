@@ -74,10 +74,11 @@ assert cc.rule_of({"hold": 24})[0] is None
 real_grade = app.grade
 app.grade = lambda t: {"n": 60, "days": 31, "avg": 0.01 if t is shadow.trades()["Tourney: strong, 12h, with BTC's week"][0] else 0,
                        "net": 1, "drawdown": 0, "checks": {}, "ok": False}
-app.S["promoted"] = None; app.graduation(); assert app.S["promoted"] is None
+app.S["promoted"] = []; app.graduation(); assert app.S["promoted"] == []
 app.grade = lambda t: {"n": 60, "days": 31, "avg": 0.02 if len(t) else 0.01, "net": 1, "drawdown": 0, "checks": {}, "ok": True}
 app.graduation()
-assert app.S["promoted"] in shadow.STRATEGIES and len(shadow.trades()[app.S["promoted"]][0]) > 0, app.S["promoted"]
+assert set(app.S["promoted"]) == set(shadow.STRATEGIES), app.S["promoted"]   # every graduate is used, not one winner
+assert len(shadow.trades()[app.S["promoted"][0]][0]) > 0   # best average first
 app.grade = real_grade
 print("tournament + promotion tests pass")
 

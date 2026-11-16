@@ -219,11 +219,15 @@ print("same-side limit tests pass")
 got = []
 app.crypto_copier.decide_crypto = lambda item, auto=False, stake=1, hold=None, quick=False: got.append((item["coin"], hold, quick)) or "ok"
 app.crypto_copier.watchlist = lambda: []
-app.S["promoted"] = "Tourney: not weak, quick take profit, against BTC's week"
+app.S["promoted"] = ["Tourney: strong, 48h, with BTC's week", "Tourney: not weak, quick take profit, against BTC's week"]
 app.S["pending"] = [{"kind": "crypto", "coin": "M1", "title": "M1", "side": "long", "score": 50, "tier": "mid", "feats": {"regime": "BTC 7d: against trade"}},
                     {"kind": "crypto", "coin": "M2", "title": "M2", "side": "long", "score": 60, "tier": "mid", "feats": {"regime": "BTC 7d: with trade"}},
                     {"kind": "crypto", "coin": "W1", "title": "W1", "side": "long", "score": 10, "tier": "weak", "feats": {"regime": "BTC 7d: against trade"}}]
 app.run_autopilot("crypto")
-assert got == [("M1", 24, True)], got
-app.S["promoted"] = None
+assert got == [("M1", 24, True)], got   # M2 (with the market, but mid) matches neither; W1 is weak
+got.clear()
+app.S["pending"] = [{"kind": "crypto", "coin": "S9", "title": "S9", "side": "short", "score": 80, "tier": "strong", "feats": {"regime": "BTC 7d: with trade"}}]
+app.run_autopilot("crypto")
+assert got == [("S9", 48, False)], got   # taken by the other graduate, with its own 48h hold
+app.S["promoted"] = []
 print("promoted strategy tests pass")
