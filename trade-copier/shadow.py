@@ -17,7 +17,8 @@ STRATEGIES = {  # name -> (tiers taken: each model's top 20% = strong, bottom 20
     "Strong, fixed exits": (("strong",), False, False),
     "Scout finds only, strong": (("strong",), True, True),
     "Strong, held 24h (as graded)": (("strong",), "24h", False),
-    "Strong, weekdays only": (("strong",), True, False, "weekdays"),  # backtest: weekend copies were weaker every period  # the model learned 24h holds; copies of fast traders
+    "Strong, weekdays only": (("strong",), True, False, "weekdays"),
+    "Strong shorts only, held 24h": (("strong",), "24h", False, "shorts"),  # blind replay: strong beat mid on shorts in every period, not on longs  # backtest: weekend copies were weaker every period  # the model learned 24h holds; copies of fast traders
 }                                                                  # close within minutes when they exit: which pays?
 # the tournament: every mix of which picks, how long to hold, and the market's direction, practiced side by side;
 # one that passes every graduation test is promoted to the crypto autopilot (app.graduation)
@@ -46,7 +47,8 @@ def takes(name, x, scouted, now):
     regime = (x.get("feats") or {}).get("regime", "")
     return (x.get("tier") in tiers and not (scout_only and x["addr"] not in scouted)
             and not (only == ["weekdays"] and now.weekday() >= 5)
-            and not (only == ["with"] and "with" not in regime) and not (only == ["against"] and "against" not in regime))
+            and not (only == ["with"] and "with" not in regime) and not (only == ["against"] and "against" not in regime)
+            and not (only == ["shorts"] and x["side"] != "short"))
 
 
 def load():

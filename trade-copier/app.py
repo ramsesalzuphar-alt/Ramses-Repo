@@ -174,7 +174,7 @@ def practice_board():
             run += h["pnl"]
             curve.append(round(run, 2))
         out.append({"name": name, "open": n_open, "tiers": [t or "unscored" for t in tiers], "exit": exits.get(e) or f"hold {e}",
-                    "filter": {"with": "with BTC's week", "against": "against BTC's week", "weekdays": "weekdays only"}.get(
+                    "filter": {"with": "with BTC's week", "against": "against BTC's week", "weekdays": "weekdays only", "shorts": "shorts only"}.get(
                         only[0] if only else None, "scout finds only" if scout_only else "any market"),
                     "win": sum(h["pnl"] > 0 for h in closed) / len(closed) if closed else None,
                     "curve": curve[-150:], "last": closed[-1] if closed else None, "promoted": name in S["promoted"],

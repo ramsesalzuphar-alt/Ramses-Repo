@@ -89,3 +89,10 @@ q = next(b for b in board if b["name"] == "Tourney: strong, quick take profit, a
 assert q["exit"] == "quick: take profit, any time" and q["filter"] == "any market" and q["n"] == 1 and len(q["curve"]) == 1 and q["win"] == 1
 assert next(b for b in board if b["name"] == "Tourney: strong, 48h, with BTC's week")["exit"] == "hold 48h"
 print("tournament page tests pass")
+
+# shorts-only book: strong shorts only
+shadow.FILE.unlink()
+shadow.open_new([item("S", "SOL", "short", "strong"), item("A", "ETH", "long", "strong")], scouted=set(), now=t0)
+assert list(shadow.load()["Strong shorts only, held 24h"]["open"]) == ["S:SOL:short"]
+assert next(b for b in app.practice_board()["strategies"] if b["name"] == "Strong shorts only, held 24h")["filter"] == "shorts only"
+print("shorts-only book tests pass")
