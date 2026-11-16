@@ -317,7 +317,8 @@ def rule_of(p):
     """(take profit, stop loss, max hours) of a copy. Every copy uses the close rule the scout learned for its trader,
     if it found one that held up on copies it never saw. Otherwise: autopilot's 3:1 default; your own copies only take profit."""
     if p.get("hold"):  # autopilot copies: held like the model was graded, with only a wide safety stop
-        return None, HOLD_STOP, p["hold"]
+        tp = ((p.get("exit") or {}).get("tp") or TAKE_PROFIT) if p.get("quick") else None  # quick: out the minute its TP is met
+        return tp, HOLD_STOP, p["hold"]
     r = p.get("exit")
     if r:
         return r.get("tp"), r.get("sl"), r.get("max_h")
@@ -489,7 +490,7 @@ def reached(side, mid, limit):
     return mid <= limit if side == "long" else mid >= limit
 
 
-def decide_crypto(item, auto=False, stake=1, limit=None, qty=None):
+def decide_crypto(item, auto=False, stake=1, limit=None, qty=None, hold=AUTO_HOLD_H, quick=False):
     """Copy an approved proposal, if the trader still holds it. stake multiplies the trade size (autopilot earns more
     than x1 by being consistently profitable). limit + qty: your own price and amount (coins); if the market isn't
     there yet it waits as an order, filled by fill_orders once it is. Returns a message."""
@@ -515,8 +516,8 @@ def decide_crypto(item, auto=False, stake=1, limit=None, qty=None):
         dollars = px * qty
     rule = scout_exit(item["addr"])  # each copy closes by its trader's learned rule, if the scout found one
     open_pos(ledger, coin, side, dollars, px, item["addr"], item.get("feats"), auto, rule)
-    if auto:
-        ledger["positions"][coin]["hold"] = AUTO_HOLD_H
+    if auto and hold:  # held exactly this long; None = close by the learned rule / when the trader exits
+        ledger["positions"][coin].update(hold=hold, quick=quick)
     save_ledger(ledger)
     return f"Copied: {side} ${dollars:,.2f} of {coin} at ${px:,.6g}" + (f" · close rule: {rule['name']}" if rule else "")
 

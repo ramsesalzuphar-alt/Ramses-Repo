@@ -55,3 +55,28 @@ assert shadow.trades()["Strong, weekdays only"] == ([], 0) and shadow.trades()["
 shadow.open_new([item("S", "ETH", "long", "strong")], scouted=set(), now=datetime(2026, 11, 16, 12))   # a Monday
 assert shadow.trades()["Strong, weekdays only"] == ([], 1)
 print("weekday book tests pass")
+
+# tournament: direction-filtered books, exact holds, quick take-profit trades; and promotion of a graduate
+shadow.FILE.unlink()
+w = {**item("S", "SOL", "short", "strong"), "feats": {"regime": "BTC 7d: with trade"}}
+shadow.open_new([w, item("A", "ETH", "long", "mid")], scouted=set(), now=t0)
+tr = shadow.trades()
+assert tr["Tourney: strong, 12h, with BTC's week"] == ([], 1) and tr["Tourney: strong, 12h, against BTC's week"] == ([], 0)
+assert tr["Tourney: not weak, 48h, any market"] == ([], 2) and shadow.hold_of("Tourney: strong, 48h, any market") == 48
+shadow.update({"SOL": "96.5", "ETH": "101"}, now=t0 + timedelta(minutes=20))   # SOL short +3.5%: its learned TP is 3%
+c = shadow.trades()["Tourney: strong, quick take profit, any market"][0]
+assert len(c) == 1 and c[0]["why"] == "quick take profit", c
+assert shadow.trades()["Tourney: not weak, quick take profit, any market"] == (c, 1)   # ETH +1% < default 6%: still open
+assert shadow.trades()["Tourney: strong, 12h, any market"] == ([], 1)
+p = {"hold": 24, "quick": True, "exit": {"tp": 0.03}}
+assert cc.rule_of(p) == (0.03, cc.HOLD_STOP, 24) and cc.rule_of({"hold": 24, "quick": True})[0] == cc.TAKE_PROFIT
+assert cc.rule_of({"hold": 24})[0] is None
+real_grade = app.grade
+app.grade = lambda t: {"n": 60, "days": 31, "avg": 0.01 if t is shadow.trades()["Tourney: strong, 12h, with BTC's week"][0] else 0,
+                       "net": 1, "drawdown": 0, "checks": {}, "ok": False}
+app.S["promoted"] = None; app.graduation(); assert app.S["promoted"] is None
+app.grade = lambda t: {"n": 60, "days": 31, "avg": 0.02 if len(t) else 0.01, "net": 1, "drawdown": 0, "checks": {}, "ok": True}
+app.graduation()
+assert app.S["promoted"] in shadow.STRATEGIES and len(shadow.trades()[app.S["promoted"]][0]) > 0, app.S["promoted"]
+app.grade = real_grade
+print("tournament + promotion tests pass")

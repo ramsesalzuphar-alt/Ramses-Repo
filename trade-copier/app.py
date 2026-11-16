@@ -29,7 +29,7 @@ MARKETS = ("crypto", "stocks")
 GUARD_LAST, GUARD_MAX_TRIPS, GUARD_LOSS = 10, 3, {"crypto": -10.0, "stocks": -100.0}
 BASE_SIZE = {"crypto": ("CRYPTO_DOLLARS_PER_TRADE", "100"), "stocks": ("DOLLARS_PER_TRADE", "1000")}  # .env setting, default
 STAKE_BLOCK, STAKE_MAX = 10, 4  # autopilot earns x2..x4 trade size by its latest blocks of 10 closed trades each making money
-KEEP = ("pending", "log", "traders", "last_check", "ap", "security", "graduates")
+KEEP = ("pending", "log", "traders", "last_check", "ap", "security", "graduates", "promoted")
 NEW_AP = {"on": False, "forced": False, "guard_since": "", "guard_trips": [], "resume": False}
 
 lock = threading.RLock()
@@ -38,7 +38,7 @@ saved = json.loads(APP_FILE.read_text()) if APP_FILE.exists() else {}
 if "ap" not in saved and "autopilot" in saved:  # state saved before stocks had an autopilot: it was crypto's
     saved["ap"] = {"crypto": {"on": saved["autopilot"], "forced": saved.get("forced", False), "guard_since": saved.get("guard_since", ""),
                               "guard_trips": saved.get("guard_trips", []), "resume": saved.get("resume_after_retrain", False)}}
-S = {"pending": [], "log": [], "traders": [], "last_check": None, "security": [], "graduates": [], "grad": [], **{k: v for k, v in saved.items() if k in KEEP},
+S = {"pending": [], "log": [], "traders": [], "last_check": None, "security": [], "graduates": [], "grad": [], "promoted": None, **{k: v for k, v in saved.items() if k in KEEP},
      "crypto": None, "stocks": None, "next_check": None, "checking": False, "error": None, "training": False,
      "model": None, "auto": {}, "scout": None, "accounts_at": None}
 S["ap"] = {m: {**NEW_AP, **S.get("ap", {}).get(m, {})} for m in MARKETS}
@@ -113,7 +113,13 @@ def graduation():
     for name in sorted(set(S["graduates"]) - now):
         log(f"'{name}' lost its graduation: its recent paper trades no longer pass every test.")
     S["graduates"] = sorted(now)
-    S["grad"] = sorted(rows, key=lambda r: (-r["ok"], -sum(r["checks"].values()), -r["n"]))[:16]
+    best = max((r for r in rows if r["ok"] and r["name"].startswith("Practice: ")), key=lambda r: r["avg"], default=None)
+    promoted = best["name"][len("Practice: "):] if best else None
+    if promoted != S["promoted"]:
+        log(f"Crypto autopilot now trades by the graduated practice strategy '{promoted}' (paper only)" if promoted
+            else "Crypto autopilot back to its own rule (strong picks, 24h holds): no practice strategy passes every test now")
+    S["promoted"] = promoted
+    S["grad"] = sorted(rows, key=lambda r: (-r["ok"], -sum(r["checks"].values()), -r["n"]))[:40]
 
 
 def stake(m):
@@ -259,7 +265,12 @@ def run_autopilot(m):
     if not (a["on"] and (a["forced"] or unlocked(m))):
         return
     mine = (lambda x: x["kind"] == "crypto") if m == "crypto" else (lambda x: x["kind"] == "pelosi" and x["side"] == "buy")
-    strong = sorted((x for x in S["pending"] if mine(x) and x.get("tier") == "strong"), key=lambda x: -x["score"])  # its model's top 20%
+    rule = S["promoted"] if m == "crypto" and S["promoted"] in shadow.STRATEGIES else None  # a graduated practice strategy
+    scouted, now = ({a for a, _, _ in crypto_copier.watchlist()} if rule else set()), datetime.now()
+    takes = (lambda x: shadow.takes(rule, x, scouted, now)) if rule else (lambda x: x.get("tier") == "strong")  # its model's top 20%
+    strong = sorted((x for x in S["pending"] if mine(x) and takes(x)), key=lambda x: -x["score"])
+    hold = shadow.hold_of(rule) if rule else crypto_copier.AUTO_HOLD_H
+    quick = bool(rule) and shadow.quick(rule)
     x = stake(m)
     held = Counter(p["side"] for p in crypto_copier.load_ledger()["positions"].values() if p.get("auto")) if m == "crypto" else Counter()
     for item in strong[:AUTO_MAX_PER_CHECK]:
@@ -274,7 +285,7 @@ def run_autopilot(m):
         if item.get("win") is not None:
             why.append(f"{item['win']:.0%} win chance -> x{confidence(item['win']):.2g}")
         try:
-            msg = (crypto_copier.decide_crypto(item, auto=True, stake=size) if m == "crypto"
+            msg = (crypto_copier.decide_crypto(item, auto=True, stake=size, hold=hold, quick=quick) if m == "crypto"
                    else copier.decide_pelosi(item, auto=True, stake=size)) + (f" ({', '.join(why)})" if why else "")
             log(f"{m.title()} autopilot ({item['score']}): {msg}")
         except Exception as e:

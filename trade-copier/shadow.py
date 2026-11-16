@@ -19,6 +19,34 @@ STRATEGIES = {  # name -> (tiers taken: each model's top 20% = strong, bottom 20
     "Strong, held 24h (as graded)": (("strong",), "24h", False),
     "Strong, weekdays only": (("strong",), True, False, "weekdays"),  # backtest: weekend copies were weaker every period  # the model learned 24h holds; copies of fast traders
 }                                                                  # close within minutes when they exit: which pays?
+# the tournament: every mix of which picks, how long to hold, and the market's direction, practiced side by side;
+# one that passes every graduation test is promoted to the crypto autopilot (app.graduation)
+for _t, _tn in ((("strong",), "strong"), (("strong", "mid"), "not weak")):
+    for _e, _en in ((True, "follow trader"), ("12h", "12h"), ("24h", "24h"), ("48h", "48h"), ("tp", "quick take profit")):
+        for _d, _dn in ((None, "any market"), ("with", "with BTC's week"), ("against", "against BTC's week")):
+            if (_t, _e, False, *([_d] if _d else [])) not in STRATEGIES.values():
+                STRATEGIES[f"Tourney: {_tn}, {_en}, {_dn}"] = (_t, _e, False, *([_d] if _d else []))
+
+
+def hold_of(name):
+    """Hours a strategy holds each copy exactly (no exit rule, no following the trader), or None."""
+    e = STRATEGIES[name][1]
+    return 24 if e == "tp" else int(e[:-1]) if isinstance(e, str) else None
+
+
+def quick(name):
+    """Quick trades: closed the minute the take profit (the trader's learned one, else the default) is met, any age;
+    still out after 24h if it never is."""
+    return STRATEGIES[name][1] == "tp"
+
+
+def takes(name, x, scouted, now):
+    """Would this strategy copy proposal x?"""
+    tiers, _, scout_only, *only = STRATEGIES[name]
+    regime = (x.get("feats") or {}).get("regime", "")
+    return (x.get("tier") in tiers and not (scout_only and x["addr"] not in scouted)
+            and not (only == ["weekdays"] and now.weekday() >= 5)
+            and not (only == ["with"] and "with" not in regime) and not (only == ["against"] and "against" not in regime))
 
 
 def load():
@@ -43,15 +71,13 @@ def open_new(items, scouted, now=None):
         if x.get("kind") != "crypto" or not x.get("price_now"):
             continue
         key = f"{x['addr']}:{x['coin']}:{x['side']}"
-        for name, (tiers, learned, scout_only, *only) in STRATEGIES.items():
-            if x.get("tier") not in tiers or (scout_only and x["addr"] not in scouted) or key in book[name]["open"]:
-                continue
-            if only == ["weekdays"] and now.weekday() >= 5:
+        for name, (_, learned, *_) in STRATEGIES.items():
+            if not takes(name, x, scouted, now) or key in book[name]["open"]:
                 continue
             book[name]["open"][key] = {"addr": x["addr"], "coin": x["coin"], "side": x["side"], "entry": x["price_now"],
                                        "opened": now.isoformat(timespec="seconds"), "score": x["score"],
-                                       "exit": cc.scout_exit(x["addr"]) if learned is True else None,
-                                       "hold": 24 if learned == "24h" else None}
+                                       "exit": cc.scout_exit(x["addr"]) if learned in (True, "tp") else None, "quick": quick(name),
+                                       "hold": hold_of(name)}
     save(book)
 
 
@@ -66,10 +92,11 @@ def update(mids, holdings=None, now=None):
                 continue
             px = float(mids[p["coin"]])
             r = (px / p["entry"] - 1) * (1 if p["side"] == "long" else -1)
-            tp, sl, mh = cc.rule_of({"auto": True, "exit": p.get("exit")})
+            tp, sl, mh = cc.rule_of({"auto": True, "exit": p.get("exit")})  # quick books: TP only, no hold (that's p's)
             age = now - datetime.fromisoformat(p["opened"])
             if p.get("hold"):  # held exactly as the model was graded: no rule, no following the trader
-                why = "24h hold" if age >= timedelta(hours=p["hold"]) else None
+                why = ("quick take profit" if p.get("quick") and tp and r >= tp else
+                       f"{p['hold']}h hold" if age >= timedelta(hours=p["hold"]) else None)
             else:
                 why = ("take profit" if tp and r >= tp else "stop loss" if sl and r <= -sl else
                        "time limit" if mh and age >= timedelta(hours=mh) else

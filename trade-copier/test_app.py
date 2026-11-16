@@ -4,7 +4,7 @@ app.APP_FILE = pathlib.Path(tempfile.mkdtemp()) / "state.json"   # never touch t
 app.shadow.FILE = app.APP_FILE.with_name("shadow.json")           # nor its practice books
 copied, bought, retrains = [], [], []
 stakes = []
-crypto_copier.decide_crypto = lambda item, auto=False, stake=1: copied.append((item["coin"], auto)) or stakes.append(stake) or f"Copied {item['coin']}"
+crypto_copier.decide_crypto = lambda item, auto=False, stake=1, hold=None, quick=False: copied.append((item["coin"], auto)) or stakes.append(stake) or f"Copied {item['coin']}"
 copier.decide_pelosi = lambda item, auto=False, stake=1: bought.append((item["title"], auto)) or stakes.append(stake) or f"Bought {item['title']}"
 app.threading.Thread = lambda target, daemon, args=(): type("T", (), {"start": lambda self: retrains.append(target)})()
 ledger = {"start": 10000, "cash": 10000, "positions": {}, "history": []}
@@ -214,3 +214,16 @@ app.run_autopilot("crypto")
 assert [c for c, _ in copied] == ["N2", "S1"], copied   # 4 longs held + 1 = 5: one more long only; the short is free
 ledger["positions"] = {}
 print("same-side limit tests pass")
+
+# a promoted (graduated) practice strategy sets the crypto autopilot's picks, direction filter, hold and quick exits
+got = []
+app.crypto_copier.decide_crypto = lambda item, auto=False, stake=1, hold=None, quick=False: got.append((item["coin"], hold, quick)) or "ok"
+app.crypto_copier.watchlist = lambda: []
+app.S["promoted"] = "Tourney: not weak, quick take profit, against BTC's week"
+app.S["pending"] = [{"kind": "crypto", "coin": "M1", "title": "M1", "side": "long", "score": 50, "tier": "mid", "feats": {"regime": "BTC 7d: against trade"}},
+                    {"kind": "crypto", "coin": "M2", "title": "M2", "side": "long", "score": 60, "tier": "mid", "feats": {"regime": "BTC 7d: with trade"}},
+                    {"kind": "crypto", "coin": "W1", "title": "W1", "side": "long", "score": 10, "tier": "weak", "feats": {"regime": "BTC 7d: against trade"}}]
+app.run_autopilot("crypto")
+assert got == [("M1", 24, True)], got
+app.S["promoted"] = None
+print("promoted strategy tests pass")
