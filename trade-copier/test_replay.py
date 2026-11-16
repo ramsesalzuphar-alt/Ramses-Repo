@@ -20,7 +20,7 @@ print("replay tests pass")
 
 # fast track: blind replay (from before live practice began) + live practice, as one record, pass every test,
 # and live confirms for a week -> promoted to the paper autopilot
-past = [{"time": f"2026-10-{d:02d}T12:00:00", "ret": 0.01, "pnl": 1.0} for d in range(1, 31) for _ in range(2)]
+past = [{"time": f"2026-10-{d:02d}T12:00:00", "side": side, "ret": 0.01, "pnl": 1.0} for d in range(1, 31) for side in ("long", "short")]
 now = lambda n, d0=1, ret=0.01: [{"time": f"2026-11-{d0 + i % 8:02d}T13:00:00", "ret": ret, "pnl": 100 * ret} for i in range(n)]
 replay.load = lambda: {"made": "x", "strategies": {"S": past}}
 assert app.fast_track("S", sorted(now(25), key=lambda h: h["time"]))["fast"]
@@ -29,4 +29,6 @@ assert not app.fast_track("S", now(25, ret=0.001))["fast"]            # live ave
 assert not app.fast_track("T", now(25))["fast"]                       # never replayed
 replay.load = lambda: {"made": "x", "strategies": {"S": past[-10:]}}  # replay covers only the last days of October
 assert not app.fast_track("S", sorted(now(25), key=lambda h: h["time"]))["fast"]   # record spans < 30 days
+replay.load = lambda: {"made": "x", "strategies": {"S": [{**h, "side": "short"} for h in past]}}
+assert not app.fast_track("S", sorted(now(25), key=lambda h: h["time"]))["fast"]   # shorts only: just one market direction
 print("fast track tests pass")

@@ -140,7 +140,9 @@ def fast_track(name, closed):
     g = grade(rp) if rp is not None else None
     before = [h for h in rp or [] if not closed or h["time"] < closed[0]["time"]]
     both = grade(before + closed) if rp is not None else None
-    fast = bool(both and both["ok"] and live["n"] >= FAST_N and live["days"] >= FAST_DAYS and live["avg"] >= GRAD_AVG and live["net"] > 0)
+    sides = [h.get("side") for h in before + closed]
+    two_way = min(sides.count("long"), sides.count("short")) >= FAST_N  # one trending market can't fast-track a one-way bet
+    fast = bool(both and both["ok"] and two_way and live["n"] >= FAST_N and live["days"] >= FAST_DAYS and live["avg"] >= GRAD_AVG and live["net"] > 0)
     return {**live, "replay": g and {k: g[k] for k in ("n", "days", "avg", "net", "checks", "ok")}, "fast": fast}
 
 

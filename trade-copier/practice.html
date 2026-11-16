@@ -177,7 +177,7 @@ function render() {
           <td>${s.replay ? `<span class="checks" title="${esc(tests.map(t => `${s.replay.checks[t] ? "✓" : "✗"} ${t}`).join("\n"))}">${tests.map(t => `<i class="${s.replay.checks[t] ? "ok" : ""}"></i>`).join("")}</span>
               <span class="muted">${s.rpassed}/5</span>` : ""}</td></tr>`;
       }).join("") : `<tr><td colspan="${COLS.length}" class="empty">No strategies match.</td></tr>`);
-  $("foot").textContent = `Graduating needs all five: ${tests.join(" · ")}. Fast track: passes all five on the blind replay (each day scored by a model that never saw it), then confirms live with 20+ trades over 7+ days averaging +0.5%. Every graduate trades for the crypto autopilot at once (paper only); real money still needs the full live graduation and your review. Hover the squares to see which tests pass.`;
+  $("foot").textContent = `Graduating needs all five: ${tests.join(" · ")}. Fast track: blind replay (each day scored by a model that never saw it) plus live practice pass all five as one record, with 20+ longs and 20+ shorts (so one trending market can't pass a one-way bet), then confirms live with 20+ trades over 7+ days averaging +0.5%. Every graduate trades for the crypto autopilot at once (paper only); real money still needs the full live graduation and your review. Hover the squares to see which tests pass.`;
   prevN = Object.fromEntries(list.map(s => [s.name, s.n]));
 }
 
