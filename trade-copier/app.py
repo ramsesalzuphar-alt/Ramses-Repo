@@ -122,6 +122,25 @@ def graduation():
     S["grad"] = sorted(rows, key=lambda r: (-r["ok"], -sum(r["checks"].values()), -r["n"]))[:40]
 
 
+def practice_board():
+    """Every practice strategy's live record for the /practice page: its rule, grade, win rate and money curve.
+    Built from shadow.STRATEGIES each time, so strategies added or removed show up (or vanish) on the next refresh."""
+    exits = {True: "follow the trader (learned rule)", False: "fixed: +6% / -2%", "tp": "quick: take profit, any time"}
+    out = []
+    for name, (closed, n_open) in shadow.trades().items():
+        tiers, e, scout_only, *only = shadow.STRATEGIES[name]
+        run, curve = 0.0, []
+        for h in closed:
+            run += h["pnl"]
+            curve.append(round(run, 2))
+        out.append({"name": name, "open": n_open, "tiers": [t or "unscored" for t in tiers], "exit": exits.get(e) or f"hold {e}",
+                    "filter": {"with": "with BTC's week", "against": "against BTC's week", "weekdays": "weekdays only"}.get(
+                        only[0] if only else None, "scout finds only" if scout_only else "any market"),
+                    "win": sum(h["pnl"] > 0 for h in closed) / len(closed) if closed else None,
+                    "curve": curve[-150:], "last": closed[-1] if closed else None, "promoted": name == S["promoted"], **grade(closed)})
+    return {"strategies": out, "promoted": S["promoted"], "time": datetime.now().isoformat(timespec="seconds")}
+
+
 def stake(m):
     """How much bigger autopilot's trades may be, earned by being consistently profitable: count its latest blocks
     of 10 closed trades that each made money, newest first. 2 blocks -> x2, 3 -> x3, 4+ -> x4; a losing latest block -> x1."""
@@ -540,6 +559,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
         if self.path == "/api/state":
             return self._send(200, snapshot)
+        if self.path == "/practice":
+            return self._send(200, (HERE / "practice.html").read_bytes(), "text/html; charset=utf-8")
+        if self.path == "/api/practice":
+            return self._send(200, json.dumps(practice_board()).encode())
         self._send(404, b"not found", "text/plain")
 
     def do_POST(self):

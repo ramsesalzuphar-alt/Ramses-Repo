@@ -80,3 +80,11 @@ app.graduation()
 assert app.S["promoted"] in shadow.STRATEGIES and len(shadow.trades()[app.S["promoted"]][0]) > 0, app.S["promoted"]
 app.grade = real_grade
 print("tournament + promotion tests pass")
+
+# the live tournament page's data: every strategy, its rule in words, and its money curve
+board = app.practice_board()["strategies"]
+assert [b["name"] for b in board] == list(shadow.STRATEGIES)
+q = next(b for b in board if b["name"] == "Tourney: strong, quick take profit, any market")
+assert q["exit"] == "quick: take profit, any time" and q["filter"] == "any market" and q["n"] == 1 and len(q["curve"]) == 1 and q["win"] == 1
+assert next(b for b in board if b["name"] == "Tourney: strong, 48h, with BTC's week")["exit"] == "hold 48h"
+print("tournament page tests pass")

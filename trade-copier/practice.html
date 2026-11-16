@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strategy Tournament</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e5e7eb;
+    --green: #15803d; --green-bg: #dcfce7; --red: #b91c1c; --red-bg: #fee2e2;
+    --amber: #a16207; --amber-bg: #fef3c7; --accent: #2563eb; --accent-bg: #dbeafe;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #181b21; --text: #e8eaee; --muted: #9aa3b2; --line: #2a2f38;
+      --green: #4ade80; --green-bg: #12321f; --red: #f87171; --red-bg: #3a1717;
+      --amber: #fbbf24; --amber-bg: #3a2c0b; --accent: #60a5fa; --accent-bg: #172554;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0; }
+  a { color: var(--accent); }
+  .sub, .muted { color: var(--muted); font-size: 13px; }
+  .live { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .dot.stale { background: var(--red); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .tile .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+  .tile .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .d { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 12px 12px; }
+  .changes { margin-bottom: 14px; display: flex; flex-direction: column; gap: 6px; }
+  .change { border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+  .change.add { background: var(--green-bg); color: var(--green); }
+  .change.rem { background: var(--red-bg); color: var(--red); }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 0; }
+  input, select { font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 7px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; cursor: pointer; user-select: none; }
+  th.sorted { color: var(--text); }
+  td { padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .r { text-align: right; font-variant-numeric: tabular-nums; }
+  .up { color: var(--green); } .down { color: var(--red); }
+  .name { font-weight: 600; }
+  td:first-child { min-width: 240px; }
+  .rule { color: var(--muted); font-size: 12px; }
+  .pill { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+  .pill.new { background: var(--accent-bg); color: var(--accent); }
+  .pill.grad { background: var(--green-bg); color: var(--green); }
+  .pill.prom { background: var(--amber-bg); color: var(--amber); }
+  .checks { display: inline-flex; gap: 3px; }
+  .checks i { width: 10px; height: 10px; border-radius: 3px; background: var(--line); display: inline-block; }
+  .checks i.ok { background: var(--green); }
+  tr.flash td { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { background: var(--accent-bg); } to { background: transparent; } }
+  svg.spark { display: block; }
+  .empty { color: var(--muted); padding: 20px 0; text-align: center; }
+  .foot { margin-top: 10px; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Strategy tournament</h1>
+      <div class="sub">Every practice strategy trades each crypto proposal its own way with $100 of practice money (real prices and fees, no account money) · <a href="/">back to the copier</a></div>
+    </div>
+    <span class="live"><span class="dot" id="dot"></span><span id="updated">connecting…</span></span>
+  </header>
+  <div class="tiles" id="tiles"></div>
+  <div class="changes" id="changes"></div>
+  <div class="card">
+    <div class="controls">
+      <input id="q" placeholder="Filter strategies…" aria-label="Filter strategies">
+      <select id="show" aria-label="Show">
+        <option value="all">All strategies</option>
+        <option value="traded">With closed trades</option>
+        <option value="tourney">Tournament only</option>
+        <option value="named">Named books only</option>
+      </select>
+      <span class="muted" id="count"></span>
+    </div>
+    <div class="scroll"><table id="board"></table></div>
+    <div class="foot" id="foot"></div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const pct = x => x == null ? "–" : `${x >= 0 ? "+" : ""}${(x * 100).toFixed(2)}%`;
+const usd = x => `${x >= 0 ? "+" : "−"}$${Math.abs(x).toFixed(2)}`;
+const cls = x => x > 0 ? "up" : x < 0 ? "down" : "";
+const COLS = [
+  ["name", "Strategy"], ["n", "Closed", "r"], ["open", "Open", "r"], ["win", "Won", "r"], ["avg", "Avg / trade", "r"],
+  ["net", "Net", "r"], ["curve", "Money curve"], ["days", "Days", "r"], ["passed", "Graduation tests"],
+];
+let sortKey = "net", sortDir = -1, data = null, known = null, prevN = {}, fresh = {}, changes = [];
+try { const s = JSON.parse(localStorage.getItem("tourney-sort")); if (s) [sortKey, sortDir] = s; } catch (e) {}
+
+function spark(curve) {
+  if (!curve.length) return `<span class="muted">no trades yet</span>`;
+  const pts = [0, ...curve], w = 120, h = 28, lo = Math.min(...pts), hi = Math.max(...pts), span = hi - lo || 1;
+  const xy = pts.map((v, i) => `${(i / (pts.length - 1) * w).toFixed(1)},${(h - 2 - (v - lo) / span * (h - 4)).toFixed(1)}`);
+  const zero = (h - 2 - (0 - lo) / span * (h - 4)).toFixed(1), end = pts[pts.length - 1];
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Money curve, ending ${usd(end)}">
+    <line x1="0" x2="${w}" y1="${zero}" y2="${zero}" stroke="var(--line)" stroke-dasharray="2 3"/>
+    <polyline points="${xy.join(" ")}" fill="none" stroke="var(${end >= 0 ? "--green" : "--red"})" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+}
+
+function track(list) {
+  // strategies that appear or disappear while the page is open are announced, and new ones are badged
+  const names = new Set(list.map(s => s.name)), now = new Date().toLocaleTimeString();
+  if (known) {
+    for (const n of names) if (!known.has(n)) { fresh[n] = Date.now(); changes.unshift({add: true, name: n, at: now}); }
+    for (const n of known) if (!names.has(n)) changes.unshift({add: false, name: n, at: now});
+  }
+  known = names;
+  changes = changes.slice(0, 6);
+  $("changes").innerHTML = changes.map(c => `<div class="change ${c.add ? "add" : "rem"}">${c.at} · ${c.add ? "Added" : "Removed"}: <b>${esc(c.name)}</b>${c.add ? " (it starts practicing on the next crypto proposal)" : " (its book is no longer traded)"}</div>`).join("");
+}
+
+function tiles(list, promoted) {
+  const traded = list.filter(s => s.n), best = [...traded].sort((a, b) => b.net - a.net)[0];
+  const grads = list.filter(s => s.ok), open = list.reduce((a, s) => a + s.open, 0), closed = list.reduce((a, s) => a + s.n, 0);
+  const near = [...list].sort((a, b) => Object.values(b.checks).filter(Boolean).length - Object.values(a.checks).filter(Boolean).length || b.net - a.net)[0];
+  const t = (k, v, d, c = "") => `<div class="tile"><div class="k">${k}</div><div class="v ${c}">${v}</div><div class="d">${d}</div></div>`;
+  $("tiles").innerHTML =
+    t("Strategies practicing", list.length, `${open} open copies · ${closed} closed`) +
+    t("Leading", best ? usd(best.net) : "–", best ? esc(best.name) : "no closed trades yet", best ? cls(best.net) : "") +
+    t("Closest to graduating", near ? `${Object.values(near.checks).filter(Boolean).length} / 5` : "–", near ? esc(near.name) : "") +
+    t("Graduated", grads.length, grads.length ? esc(grads.map(s => s.name).join(", ")) : "needs 50+ trades over 30+ days", grads.length ? "up" : "") +
+    t("Autopilot follows", promoted ? "Promoted" : "Its own rule", promoted ? esc(promoted) : "strong picks, 24h holds (until one graduates)");
+}
+
+function render() {
+  if (!data) return;
+  const list = data.strategies, q = $("q").value.toLowerCase(), show = $("show").value;
+  for (const s of list) s.passed = Object.values(s.checks).filter(Boolean).length;
+  const rows = list.filter(s => (!q || `${s.name} ${s.exit} ${s.filter} ${s.tiers}`.toLowerCase().includes(q))
+      && (show === "all" || (show === "traded" && s.n) || (show === "tourney" && s.name.startsWith("Tourney")) || (show === "named" && !s.name.startsWith("Tourney"))))
+    .sort((a, b) => {
+      const va = sortKey === "curve" ? a.net : a[sortKey], vb = sortKey === "curve" ? b.net : b[sortKey];
+      if (typeof va === "string") return sortDir * va.localeCompare(vb);
+      return sortDir * ((va ?? -1e9) - (vb ?? -1e9)) || b.n - a.n;
+    });
+  $("count").textContent = `${rows.length} of ${list.length} shown`;
+  const tests = list.length ? Object.keys(list[0].checks) : [];
+  $("board").innerHTML = `<tr>${COLS.map(([k, label, c]) => `<th class="${c || ""} ${k === sortKey ? "sorted" : ""}" data-k="${k}">${label}${k === sortKey ? (sortDir < 0 ? " ↓" : " ↑") : ""}</th>`).join("")}</tr>`
+    + (rows.length ? rows.map(s => {
+        const isNew = fresh[s.name] && Date.now() - fresh[s.name] < 15 * 60e3, moved = prevN[s.name] != null && prevN[s.name] !== s.n;
+        const name = s.name.replace(/^Tourney: /, "");
+        return `<tr class="${moved ? "flash" : ""}">
+          <td><div class="name">${esc(name)} ${isNew ? '<span class="pill new">NEW</span>' : ""}${s.ok ? ' <span class="pill grad">GRADUATED</span>' : ""}${s.promoted ? ' <span class="pill prom">AUTOPILOT USES THIS</span>' : ""}</div>
+              <div class="rule">${esc(s.tiers.join(" + "))} picks · ${esc(s.exit)} · ${esc(s.filter)}</div></td>
+          <td class="r">${s.n}</td><td class="r">${s.open}</td>
+          <td class="r">${s.win == null ? "–" : Math.round(s.win * 100) + "%"}</td>
+          <td class="r ${cls(s.avg)}">${s.n ? pct(s.avg) : "–"}</td>
+          <td class="r ${cls(s.net)}">${s.n ? usd(s.net) : "–"}</td>
+          <td>${spark(s.curve)}</td>
+          <td class="r">${s.days}</td>
+          <td><span class="checks" title="${esc(tests.map(t => `${s.checks[t] ? "✓" : "✗"} ${t}`).join("\n"))}">${tests.map(t => `<i class="${s.checks[t] ? "ok" : ""}"></i>`).join("")}</span>
+              <span class="muted">${s.passed}/5</span></td></tr>`;
+      }).join("") : `<tr><td colspan="${COLS.length}" class="empty">No strategies match.</td></tr>`);
+  $("foot").textContent = `Graduating needs all five: ${tests.join(" · ")}. Hover the squares to see which pass. A graduate is promoted to the crypto autopilot (paper only); real money still needs your review.`;
+  prevN = Object.fromEntries(list.map(s => [s.name, s.n]));
+}
+
+$("board").addEventListener("click", e => {
+  const k = e.target.closest("th")?.dataset.k;
+  if (!k) return;
+  sortDir = k === sortKey ? -sortDir : (k === "name" ? 1 : -1);
+  sortKey = k;
+  try { localStorage.setItem("tourney-sort", JSON.stringify([sortKey, sortDir])); } catch (e) {}
+  render();
+});
+$("q").addEventListener("input", render);
+$("show").addEventListener("change", render);
+
+async function load() {
+  try {
+    const r = await fetch("/api/practice", {cache: "no-store"});
+    if (!r.ok) throw new Error(r.status);
+    data = await r.json();
+    track(data.strategies);
+    tiles(data.strategies, data.promoted);
+    render();
+    $("dot").className = "dot";
+    $("updated").textContent = `live · updated ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    $("dot").className = "dot stale";
+    $("updated").textContent = "can't reach the copier, retrying…";
+  }
+}
+load(); setInterval(load, 5000);
+</script>
+</body>
+</html>
