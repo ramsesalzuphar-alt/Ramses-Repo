@@ -32,3 +32,22 @@ assert not app.fast_track("S", sorted(now(25), key=lambda h: h["time"]))["fast"]
 replay.load = lambda: {"made": "x", "strategies": {"S": [{**h, "side": "short"} for h in past]}}
 assert not app.fast_track("S", sorted(now(25), key=lambda h: h["time"]))["fast"]   # shorts only: just one market direction
 print("fast track tests pass")
+
+# evidence graduation: each DAY counts once; 14+ days, money every week, a rising AND a falling BTC week, clearly > 0
+from datetime import date, timedelta
+d0 = date(2026, 11, 2)
+day = lambda i, ret=0.01, n=3: [{"time": f"{d0 + timedelta(i)}T12:00:00", "ret": ret, "pnl": 100 * ret} for _ in range(n)]
+good = sum((day(i, 0.01 + 0.002 * (i % 3)) for i in range(15)), [])
+btc = {str(d0 + timedelta(k)): 100 * (1.03 if k >= 6 and k < 7 else 1) for k in range(30)}   # week 1 rises 3%
+btc.update({str(d0 + timedelta(7)): 100, str(d0 + timedelta(13)): 96})                     # week 2 falls 4%
+ev = app.evidence(good, btc)
+assert ev["ok"] and ev["days"] == 15, ev
+assert not app.evidence(good, {k: 100 for k in btc})["checks"]["rising and falling weeks"]          # one kind of market only
+assert not app.evidence(good[:13 * 3], btc)["checks"]["14+ trading days"]
+bad_week = sum((day(i, 0.01 if i < 7 else -0.004) for i in range(15)), [])
+assert not app.evidence(bad_week, btc)["checks"]["money every week"]
+lucky = day(0, 0.20, 50) + sum((day(i, -0.002) for i in range(1, 15)), [])   # one huge day, then small losses
+assert not app.evidence(lucky, btc)["checks"]["clearly above zero"]           # 50 trades on one day still count as one day
+app.btc_daily = lambda: btc
+assert app.fast_track("nothing replayed", good)["fast"]                       # passes without any replay
+print("evidence graduation tests pass")

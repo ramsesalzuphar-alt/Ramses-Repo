@@ -4,9 +4,9 @@ New trades wait for your Copy/Skip; exits of copied trades happen automatically.
 Relearns every 6 hours. Each market (crypto, stocks) has its own autopilot that copies STRONG trades by itself; it only unlocks
 once that market's live track record proves an edge, or runs as a paper experiment if you start it.
 """
-import json, os, threading, time, traceback
+import json, os, statistics, threading, time, traceback
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import copier, crypto_copier, learn, replay, scout, shadow
@@ -64,6 +64,7 @@ def closed_trades(m):
 GRAD_TRADES, GRAD_DAYS, GRAD_AVG = 50, 30, 0.005  # graduation: 50+ closed paper trades over 30+ days averaging +0.5%+
 FAST_N, FAST_DAYS = 20, 7  # fast track: passes every test on its blind 30-day replay, then confirms live: 20+ trades, 7+ days, avg +0.5%+
 REPLAY_EVERY = 24 * 3600
+EVID_DAYS, EVID_MOVE = 14, 0.02  # evidence graduation: 14+ trading days, through a week BTC rose 2%+ and one it fell 2%+
 
 
 def grade(trades):
@@ -131,6 +132,50 @@ def graduation():
     S["grad"] = sorted(rows, key=lambda r: (-r["ok"], -sum(r["checks"].values()), -r["n"]))[:40]
 
 
+_btc = {"at": 0.0, "d": {}}
+
+
+def btc_daily():
+    """{YYYY-MM-DD: BTC daily close} for the last 90 days, refreshed hourly: tells a rising week from a falling one."""
+    if time.time() - _btc["at"] > 3600:
+        try:
+            end = int(time.time() * 1000)
+            rows = crypto_copier.hl({"type": "candleSnapshot", "req": {"coin": "BTC", "interval": "1d", "startTime": end - 90 * 86_400_000, "endTime": end}})
+            _btc.update(at=time.time(), d={datetime.utcfromtimestamp(k["t"] / 1000).date().isoformat(): float(k["c"]) for k in rows})
+        except Exception:  # keep the last known closes; try again next check
+            pass
+    return _btc["d"]
+
+
+def evidence(closed, btc):
+    """Graduation on evidence instead of a fixed 30 days. Trades closed on the same day rise and fall together, so each
+    DAY counts once: 14+ trading days, money made in every week, at least one week BTC rose 2%+ AND one it fell 2%+
+    (so one trending market can't pass), the average day +0.5%+, and clearly above zero (average minus two standard
+    errors of the daily results > 0). Promotes to the paper autopilot only; real money still needs the full graduation."""
+    by = {}
+    for h in closed:
+        by.setdefault(h["time"][:10], []).append(h["ret"])
+    days = sorted(by)
+    daily = [statistics.fmean(by[d]) for d in days]
+    first = date.fromisoformat(days[0]) if days else date.today()
+    weeks = {}
+    for h in closed:
+        weeks.setdefault((date.fromisoformat(h["time"][:10]) - first).days // 7, []).append(h["pnl"])
+    moves = []
+    for w in weeks:
+        a, z = (btc.get(date.fromordinal(first.toordinal() + 7 * w + k).isoformat()) for k in (0, 6))
+        if a and z:
+            moves.append(z / a - 1)
+    mean = statistics.fmean(daily) if daily else 0.0
+    sure = len(daily) >= 2 and mean - 2 * statistics.stdev(daily) / len(daily) ** 0.5 > 0
+    checks = {f"{EVID_DAYS}+ trading days": len(days) >= EVID_DAYS,
+              "money every week": bool(weeks) and all(sum(v) > 0 for v in weeks.values()),
+              "rising and falling weeks": any(m >= EVID_MOVE for m in moves) and any(m <= -EVID_MOVE for m in moves),
+              "avg day +0.5%+": mean >= GRAD_AVG,
+              "clearly above zero": sure}
+    return {"days": len(days), "avg_day": mean, "checks": checks, "ok": all(checks.values())}
+
+
 def fast_track(name, closed):
     """A practice strategy's live grade, its blind replay grade, and whether it graduates by fast track: its blind
     replay trades from before its first live trade plus its live trades, as one record, pass every test (so the
@@ -143,7 +188,10 @@ def fast_track(name, closed):
     sides = [h.get("side") for h in before + closed]
     two_way = min(sides.count("long"), sides.count("short")) >= FAST_N  # one trending market can't fast-track a one-way bet
     fast = bool(both and both["ok"] and two_way and live["n"] >= FAST_N and live["days"] >= FAST_DAYS and live["avg"] >= GRAD_AVG and live["net"] > 0)
-    return {**live, "replay": g and {k: g[k] for k in ("n", "days", "avg", "net", "checks", "ok")}, "fast": fast}
+    # BTC's closes are only needed (and fetched) once a strategy has enough trading days to pass
+    ev = evidence(closed, btc_daily() if len({h["time"][:10] for h in closed}) >= EVID_DAYS else {})
+    return {**live, "replay": g and {k: g[k] for k in ("n", "days", "avg", "net", "checks", "ok")}, "evidence": ev,
+            "fast": fast or ev["ok"]}
 
 
 def replay_daily():

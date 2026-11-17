@@ -140,7 +140,7 @@ const usd = x => `${x >= 0 ? "+" : "−"}$${Math.abs(x).toFixed(2)}`;
 const cls = x => x > 0 ? "up" : x < 0 ? "down" : "";
 const COLS = [
   ["name", "Strategy"], ["n", "Closed", "r"], ["open", "Open", "r"], ["win", "Won", "r"], ["avg", "Avg / trade", "r"],
-  ["net", "Net", "r"], ["curve", "Money curve"], ["days", "Days", "r"], ["passed", "Graduation tests"],
+  ["net", "Net", "r"], ["curve", "Money curve"], ["days", "Days", "r"], ["epassed", "Fast graduation (14+ days)"], ["passed", "Full graduation (30 days)"],
   ["rnet", "Blind replay (30 days)", "r"], ["rpassed", "Replay tests"],
 ];
 let sortKey = "net", sortDir = -1, data = null, known = null, prevN = {}, fresh = {}, changes = [];
@@ -189,6 +189,7 @@ function render() {
   const list = data.strategies, q = $("q").value.toLowerCase(), show = $("show").value;
   for (const s of list) {
     s.passed = Object.values(s.checks).filter(Boolean).length;
+    s.epassed = s.evidence ? Object.values(s.evidence.checks).filter(Boolean).length : 0;
     s.rnet = s.replay ? s.replay.net : null;
     s.rpassed = s.replay ? Object.values(s.replay.checks).filter(Boolean).length : null;
   }
@@ -214,13 +215,15 @@ function render() {
           <td class="r ${cls(s.net)}">${s.n ? usd(s.net) : "–"}</td>
           <td>${spark(s.curve)}</td>
           <td class="r">${s.days}</td>
+          <td>${s.evidence ? `<span class="checks" title="${esc(Object.entries(s.evidence.checks).map(([t, v]) => `${v ? "✓" : "✗"} ${t}`).join("\n"))}">${Object.values(s.evidence.checks).map(v => `<i class="${v ? "ok" : ""}"></i>`).join("")}</span>
+              <span class="muted">${s.epassed}/5 · ${s.evidence.days}d</span>` : ""}</td>
           <td><span class="checks" title="${esc(tests.map(t => `${s.checks[t] ? "✓" : "✗"} ${t}`).join("\n"))}">${tests.map(t => `<i class="${s.checks[t] ? "ok" : ""}"></i>`).join("")}</span>
               <span class="muted">${s.passed}/5</span></td>
           <td class="r">${s.replay ? `<span class="${cls(s.replay.net)}">${usd(s.replay.net)}</span> <span class="muted">· ${s.replay.n} · ${pct(s.replay.avg)}</span>` : '<span class="muted">not replayed</span>'}</td>
           <td>${s.replay ? `<span class="checks" title="${esc(tests.map(t => `${s.replay.checks[t] ? "✓" : "✗"} ${t}`).join("\n"))}">${tests.map(t => `<i class="${s.replay.checks[t] ? "ok" : ""}"></i>`).join("")}</span>
               <span class="muted">${s.rpassed}/5</span>` : ""}</td></tr>`;
       }).join("") : `<tr><td colspan="${COLS.length}" class="empty">No strategies match.</td></tr>`);
-  $("foot").textContent = `Graduating needs all five: ${tests.join(" · ")}. Fast track: blind replay (each day scored by a model that never saw it) plus live practice pass all five as one record, with 20+ longs and 20+ shorts (so one trending market can't pass a one-way bet), then confirms live with 20+ trades over 7+ days averaging +0.5%. Every graduate trades for the crypto autopilot at once (paper only); real money still needs the full live graduation and your review. Hover the squares to see which tests pass.`;
+  $("foot").textContent = `Fast graduation (promotes to the paper autopilot): 14+ trading days, money made every week, through a week BTC rose 2%+ and one it fell 2%+, the average day +0.5%+, and clearly above zero, with each day counted once (trades on the same day move together, so 80 trades on one day prove less than 14 separate days). Full graduation (needed before real money): ${tests.join(" · ")}. Replay fast track: blind replay (each day scored by a model that never saw it) plus live practice pass all five as one record, with 20+ longs and 20+ shorts (so one trending market can't pass a one-way bet), then confirms live with 20+ trades over 7+ days averaging +0.5%. Every graduate trades for the crypto autopilot at once (paper only); real money still needs the full live graduation and your review. Hover the squares to see which tests pass.`;
   prevN = Object.fromEntries(list.map(s => [s.name, s.n]));
 }
 
