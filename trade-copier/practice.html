@@ -61,9 +61,52 @@
   svg.spark { display: block; }
   .empty { color: var(--muted); padding: 20px 0; text-align: center; }
   .foot { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  /* side panel: every part of the copier one click away */
+  .side { position: fixed; top: 0; left: 0; bottom: 0; width: 220px; overflow-y: auto; background: var(--card);
+          border-right: 1px solid var(--line); padding: 18px 12px; z-index: 5; }
+  .side .brand { font-weight: 700; font-size: 15px; padding: 0 8px 4px; }
+  .side .live { font-size: 12px; color: var(--muted); padding: 0 8px 12px; }
+  .side h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 8px 4px; font-weight: 600; }
+  .side a { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px;
+            color: var(--text); text-decoration: none; font-size: 14px; }
+  .side a:hover { background: var(--bg); }
+  .side a[aria-current="true"] { background: var(--bg); color: var(--accent); font-weight: 600; }
+  .side .n { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 7px; background: var(--bg); color: var(--muted); }
+  .side .n.hot { background: var(--accent); color: #fff; }
+  .side .n.good { background: var(--green-bg); color: var(--green); }
+  body { padding-left: 220px; }
+  @media (max-width: 900px) {
+    body { padding-left: 0; }
+    .side { position: static; width: auto; border-right: 0; border-bottom: 1px solid var(--line); display: flex; flex-wrap: nowrap;
+            overflow-x: auto; gap: 2px; padding: 8px 12px; align-items: center; }
+    .side .brand, .side .live, .side h4 { display: none; }
+    .side a { white-space: nowrap; flex: none; }
+  }
 </style>
 </head>
 <body>
+<nav class="side" aria-label="Everything in the copier">
+  <div class="brand">Trade Copier</div>
+  <div class="live">Live practice books</div>
+  <h4>Today</h4>
+  <a href="/#sec-log">Activity log</a>
+  <a href="/#sec-positions">Open positions</a>
+  <a href="/#sec-accounts">Paper accounts</a>
+  <h4>Autopilots</h4>
+  <a href="/#sec-autopilots">Autopilots</a>
+  <a href="/#sec-grad">Graduation</a>
+  <a href="/practice" aria-current="true">Strategy tournament</a>
+  <h4>Crypto</h4>
+  <a href="/#sec-crypto-waiting">Waiting trades</a>
+  <a href="/#sec-crypto-learning">Learning &amp; live test</a>
+  <a href="/#sec-crypto-methods">Trader methods</a>
+  <a href="/#sec-scout">Edge scout</a>
+  <a href="/#sec-traders">Top traders</a>
+  <h4>Stocks</h4>
+  <a href="/#sec-stocks-waiting">Waiting trades</a>
+  <a href="/#sec-stocks-learning">Learning &amp; live test</a>
+  <a href="/#sec-stocks-methods">Member methods</a>
+</nav>
 <div class="wrap">
   <header>
     <div>

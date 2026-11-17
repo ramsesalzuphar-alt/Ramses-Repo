@@ -97,9 +97,52 @@
   #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--bg);
            padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
   #toast.show { opacity: 1; }
+  /* side panel: every part of the copier one click away */
+  .side { position: fixed; top: 0; left: 0; bottom: 0; width: 220px; overflow-y: auto; background: var(--card);
+          border-right: 1px solid var(--line); padding: 18px 12px; z-index: 5; }
+  .side .brand { font-weight: 700; font-size: 15px; padding: 0 8px 4px; }
+  .side .live { font-size: 12px; color: var(--muted); padding: 0 8px 12px; }
+  .side h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 8px 4px; font-weight: 600; }
+  .side a { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px;
+            color: var(--text); text-decoration: none; font-size: 14px; }
+  .side a:hover { background: var(--bg); }
+  .side a[aria-current="true"] { background: var(--bg); color: var(--accent); font-weight: 600; }
+  .side .n { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 7px; background: var(--bg); color: var(--muted); }
+  .side .n.hot { background: var(--accent); color: #fff; }
+  .side .n.good { background: var(--green-bg); color: var(--green); }
+  body { padding-left: 220px; }
+  @media (max-width: 900px) {
+    body { padding-left: 0; }
+    .side { position: static; width: auto; border-right: 0; border-bottom: 1px solid var(--line); display: flex; flex-wrap: nowrap;
+            overflow-x: auto; gap: 2px; padding: 8px 12px; align-items: center; }
+    .side .brand, .side .live, .side h4 { display: none; }
+    .side a { white-space: nowrap; flex: none; }
+  }
 </style>
 </head>
 <body>
+<nav class="side" aria-label="Everything in the copier">
+  <div class="brand">Trade Copier</div>
+  <div class="live" id="sb-status">Loading…</div>
+  <h4>Today</h4>
+  <a href="#sec-log" data-go>Activity log</a>
+  <a href="#sec-positions" data-go>Open positions</a>
+  <a href="#sec-accounts" data-go>Paper accounts</a>
+  <h4>Autopilots</h4>
+  <a href="#sec-autopilots" data-go>Autopilots <span class="n" id="sb-ap">–</span></a>
+  <a href="#sec-grad" data-go>Graduation <span class="n" id="sb-grad">0</span></a>
+  <a href="/practice">Strategy tournament ↗</a>
+  <h4>Crypto</h4>
+  <a href="#sec-crypto-waiting" data-go>Waiting trades <span class="n" id="sb-crypto">0</span></a>
+  <a href="#sec-crypto-learning" data-go>Learning &amp; live test</a>
+  <a href="#sec-crypto-methods" data-go>Trader methods</a>
+  <a href="#sec-scout" data-go>Edge scout</a>
+  <a href="#sec-traders" data-go>Top traders</a>
+  <h4>Stocks</h4>
+  <a href="#sec-stocks-waiting" data-go>Waiting trades <span class="n" id="sb-stocks">0</span></a>
+  <a href="#sec-stocks-learning" data-go>Learning &amp; live test</a>
+  <a href="#sec-stocks-methods" data-go>Member methods</a>
+</nav>
 <div class="wrap">
   <header>
     <div>
@@ -117,57 +160,57 @@
   </nav>
 
   <div data-tab="crypto">
-    <section>
+    <section id="sec-crypto-waiting">
       <h2>Waiting for you <span class="sub">newest first · crypto trades disappear after 10 minutes</span>
         <button class="small" id="skipall-crypto" data-skipall="crypto" hidden>Skip all</button></h2>
       <div id="pending-crypto" class="grid"></div>
     </section>
-    <section class="card">
+    <section class="card" id="sec-crypto-learning">
       <h2>Learning <span class="sub">crypto · autopilot is on the Accounts tab</span></h2>
       <div id="model-crypto"></div>
     </section>
-    <section>
+    <section id="sec-crypto-methods">
       <h2>Trader methods <span class="sub">each trader's own model: their habits, and when copying them worked</span></h2>
       <div id="methods-crypto" class="grid"></div>
     </section>
-    <section class="card">
+    <section class="card" id="sec-scout">
       <h2>Edge scout <span class="sub">scans every active, profitable trader nonstop for copies that win consistently, not just big</span></h2>
       <div id="scout"></div>
     </section>
-    <section class="card"><h2>Top crypto traders this month</h2><div id="traders" class="traders"></div></section>
+    <section class="card" id="sec-traders"><h2>Top crypto traders this month</h2><div id="traders" class="traders"></div></section>
   </div>
 
   <div data-tab="stocks" hidden>
-    <section>
+    <section id="sec-stocks-waiting">
       <h2>Waiting for you <span class="sub">House members and company insiders (SEC Form 4), newest filings first · insider buys disappear 3 days after filing</span>
         <button class="small" id="skipall-stocks" data-skipall="stocks" hidden>Skip all</button></h2>
       <div id="pending-stocks" class="grid"></div>
     </section>
-    <section class="card">
+    <section class="card" id="sec-stocks-learning">
       <h2>Learning <span class="sub">stocks · learned from every House member's trades · autopilot is on the Accounts tab</span></h2>
       <div id="model-stocks"></div>
     </section>
-    <section>
+    <section id="sec-stocks-methods">
       <h2>Member methods <span class="sub">each member's own model: their habits, and when copying them worked</span></h2>
       <div id="methods-stocks" class="grid"></div>
     </section>
   </div>
 
   <div data-tab="accounts" hidden>
-    <section class="card"><h2>All open positions <span class="sub" id="totals-at"></span></h2><div id="totals"></div></section>
-    <section class="card"><h2>Graduation <span class="sub">which strategies have earned real money, judged only on autopilot's own paper trades</span></h2>
+    <section class="card" id="sec-positions"><h2>All open positions <span class="sub" id="totals-at"></span></h2><div id="totals"></div></section>
+    <section class="card" id="sec-grad"><h2>Graduation <span class="sub">which strategies have earned real money, judged only on autopilot's own paper trades</span></h2>
       <div id="grad"></div></section>
-    <section class="two">
+    <section class="two" id="sec-autopilots">
       <div class="card"><h2>Crypto autopilot</h2><div id="ap-crypto"></div></div>
       <div class="card"><h2>Stock autopilot</h2><div id="ap-stocks"></div></div>
     </section>
-    <section class="two">
+    <section class="two" id="sec-accounts">
       <div class="card"><h2>Crypto paper account</h2><div id="crypto"></div></div>
       <div class="card"><h2>Stock paper account <span class="sub">Alpaca</span></h2><div id="stocks"></div></div>
     </section>
   </div>
 
-  <section class="card"><h2>Activity</h2><div id="log" class="log scroll"></div></section>
+  <section class="card" id="sec-log"><h2>Activity</h2><div id="log" class="log scroll"></div></section>
 
   <footer>Paper money only. Scores show how often similar past trades made money (python learn.py to retrain) and are not financial advice.</footer>
 </div>
@@ -425,6 +468,7 @@ function set(id, html) {  // only redraw when something changed, so clicks aren'
 function render(s) {
   busy = s.checking;
   if (s.dollars) DOLLARS = s.dollars;
+  $("sb-status").textContent = s.training ? "Relearning…" : s.checking ? "Checking now…" : `Last check ${s.last_check || "—"}`;
   $("status").textContent = s.checking ? "Checking…" : `Last check ${s.last_check || "—"}` + (s.next_check ? ` · next ${s.next_check}` : "");
   $("check").disabled = s.checking;
   set("error", (s.security && s.security.length ? `<div class="banner"><b>Rotate your Alpaca keys now.</b> Your paper account has
@@ -437,6 +481,8 @@ function render(s) {
     const mine = s.pending.filter(p => (p.kind === "crypto") === (mk === "crypto"))
                           .sort((a, b) => when(b) - when(a));  // newest first
     $("count-" + mk).textContent = mine.length;
+    $("sb-" + mk).textContent = mine.length;
+    $("sb-" + mk).classList.toggle("hot", mine.length > 0);
     const sk = $("skipall-" + mk);
     sk.hidden = !mine.length; sk.disabled = s.checking;
     if (armed !== "skipall:" + mk) sk.textContent = "Skip all";
@@ -447,6 +493,8 @@ function render(s) {
     set("ap-" + mk, autopilotCard(s, mk));
   }
   const on = ["crypto", "stocks"].filter(mk => s.ap[mk].on);
+  $("sb-ap").textContent = `${on.length} on`; $("sb-ap").classList.toggle("good", on.length > 0);
+  $("sb-grad").textContent = (s.graduates || []).length; $("sb-grad").classList.toggle("good", (s.graduates || []).length > 0);
   $("ap-dot").innerHTML = ((s.graduates || []).length ? `<span class="pill STRONG" style="font-size:11px">${s.graduates.length} GRADUATED</span> ` : "")
     + (on.length ? `<span class="pill on" style="font-size:11px">${on.length} ON</span>` : "");
   document.querySelectorAll(".ago[data-ts]").forEach(e => e.textContent = "· " + ago(+e.dataset.ts));  // in place: no redraw
@@ -508,7 +556,23 @@ document.addEventListener("click", e => {
   else if (b.dataset.retrain) { b.disabled = true; post("/api/retrain"); }
   else if (b.dataset.secreset) { b.disabled = true; post("/api/security_reset"); }
 });
+function go(hash) {  // side panel: open the section's tab, then scroll to it
+  const el = hash && document.querySelector(hash);
+  if (!el) return;
+  const t = el.closest("[data-tab]");
+  if (t) showTab(t.dataset.tab);
+  document.querySelectorAll(".side a").forEach(a => a.setAttribute("aria-current", a.getAttribute("href") === hash));
+  el.scrollIntoView({block: "start"});
+}
+document.addEventListener("click", e => {
+  const a = e.target.closest("a[data-go]");
+  if (!a) return;
+  e.preventDefault();
+  history.replaceState(null, "", a.getAttribute("href"));
+  go(a.getAttribute("href"));
+});
 showTab(tab); load(); setInterval(load, 5000);
+if (location.hash) requestAnimationFrame(() => go(location.hash));  // links from the tournament page
 </script>
 </body>
 </html>
