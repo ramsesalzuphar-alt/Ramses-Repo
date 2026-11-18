@@ -11,15 +11,21 @@ import re, time, traceback
 from copier import get
 import crypto_copier as cc
 
-FUNDING_HOT = 0.0002          # hourly funding of +/-0.02%: one side pays a lot to hold (backtest: shorts above +0.02% won 64%)
-OI_JUMP, OI_MOVE, OI_LAG = 0.10, 0.02, 3600  # open interest +10% within an hour, with price moving 2%+ the same way
+OI_MOVE, OI_LAG = 0.02, 3600  # open interest compared hour on hour; the price must have moved 2%+ too
 NEWS_EVERY = 15 * 60
 FEEDS = ("https://www.coindesk.com/arc/outboundfeeds/rss/", "https://cointelegraph.com/rss", "https://decrypt.co/feed")
+# a grid of variants, all practiced at once: which threshold and which hold work is what the tournament finds out
+# (backtest: shorts above +0.02%/h funding won 64%; more variants also means more lucky ones, which graduation filters)
+FUNDING = [(t, h) for t in (0.0001, 0.0002, 0.0005) for h in (8, 24)]
+OI = [(j, h) for j in (0.05, 0.10, 0.20) for h in (4, 12)]
+NEWS_HOLDS = (6, 24, 72)
+fund_name = lambda side, t, h: f"Own: {side} when funding {'above +' if side == 'short' else 'below -'}{t * 100:.2f}%/h, {h}h"
+oi_name = lambda way, j, h: f"Own: open interest +{j:.0%} in 1h, {way}, {h}h"
+news_name = lambda h: f"Own: news sentiment, {h}h"
 SIGNALS = {  # practice book -> hours each trade is held
-    "Own: short very high funding": 24,
-    "Own: long very negative funding": 24,
-    "Own: open-interest surge (momentum)": 12,
-    "Own: news sentiment": 24,
+    **{fund_name(side, t, h): h for t, h in FUNDING for side in ("short", "long")},
+    **{oi_name(way, j, h): h for j, h in OI for way in ("with the move", "against the move")},
+    **{news_name(h): h for h in NEWS_HOLDS},
 }
 NAMES = {"BTC": r"bitcoin|btc", "ETH": r"ethereum|ether\b|eth\b", "SOL": r"solana|\bsol\b", "XRP": r"\bxrp\b|ripple",
          "DOGE": r"dogecoin|\bdoge\b", "ADA": r"cardano", "AVAX": r"avalanche|\bavax\b", "LINK": r"chainlink",
@@ -43,7 +49,7 @@ def from_news(titles):
     for title in titles:
         for coin, tone in news_score(title):
             net[coin] = net.get(coin, 0) + tone
-    return [("Own: news sentiment", c, "long" if n > 0 else "short") for c, n in net.items() if n]
+    return [(news_name(h), c, "long" if n > 0 else "short") for c, n in net.items() if n for h in NEWS_HOLDS]
 
 
 def from_market(ctxs, now, snaps):
@@ -52,19 +58,22 @@ def from_market(ctxs, now, snaps):
     out = []
     for coin, c in ctxs.items():
         f = float(c.get("funding") or 0)
-        if f >= FUNDING_HOT:
-            out.append(("Own: short very high funding", coin, "short"))
-        elif f <= -FUNDING_HOT:
-            out.append(("Own: long very negative funding", coin, "long"))
+        for t, h in FUNDING:
+            if f >= t:
+                out.append((fund_name("short", t, h), coin, "short"))
+            elif f <= -t:
+                out.append((fund_name("long", t, h), coin, "long"))
     snap = {coin: (float(c.get("openInterest") or 0), float(c.get("markPx") or 0)) for coin, c in ctxs.items()}
     old = next((s for t, s in snaps if now - t >= OI_LAG), None)  # snaps: newest first
     if old:
         for coin, (oi, px) in snap.items():
             o = old.get(coin)
-            if o and o[0] > 0 and o[1] > 0 and oi / o[0] - 1 >= OI_JUMP:
-                move = px / o[1] - 1
-                if abs(move) >= OI_MOVE:
-                    out.append(("Own: open-interest surge (momentum)", coin, "long" if move > 0 else "short"))
+            if o and o[0] > 0 and o[1] > 0 and abs(move := px / o[1] - 1) >= OI_MOVE:
+                up = "long" if move > 0 else "short"
+                for j, h in OI:
+                    if oi / o[0] - 1 >= j:  # momentum and its mirror (fading the move), so the tournament tells which
+                        out += [(oi_name("with the move", j, h), coin, up),
+                                (oi_name("against the move", j, h), coin, "short" if up == "long" else "long")]
     snaps.insert(0, (now, snap))
     snaps[:] = [s for s in snaps if now - s[0] <= 2 * OI_LAG]  # two hours of 5-minute snapshots is plenty
     return out
