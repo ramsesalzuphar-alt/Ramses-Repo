@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import copier, crypto_copier, learn, replay, scout, shadow
+import copier, crypto_copier, learn, replay, scout, shadow, signals
 copier.load_env()  # .env settings (trade sizes) before the first page load
 
 HERE = Path(__file__).parent
@@ -119,7 +119,9 @@ def graduation():
     S["graduates"] = sorted(now)
     # every practice strategy that graduated (fully, or by fast track) trades for the autopilot at once, best avg first
     promoted = [r["name"][len("Practice: "):] for r in sorted(rows, key=lambda r: -r["avg"])
-                if r["name"].startswith("Practice: ") and (r["ok"] or r.get("fast"))]
+                if r["name"].startswith("Practice: ") and r["name"][len("Practice: "):] in shadow.STRATEGIES and (r["ok"] or r.get("fast"))]
+    # (own-trade books that graduate are announced like every strategy; the autopilot copies proposals, so trading
+    # their signals for real paper money is a separate step for your review)
     for k in promoted:
         if k not in S["promoted"]:
             log(f"Crypto autopilot now also trades by the graduated practice strategy '{k}' (paper only)")
@@ -216,13 +218,13 @@ def practice_board():
     exits = {True: "follow the trader (learned rule)", False: "fixed: +6% / -2%", "tp": "quick: take profit, any time"}
     out = []
     for name, (closed, n_open) in shadow.trades().items():
-        tiers, e, scout_only, *only = shadow.STRATEGIES[name]
+        tiers, e, scout_only, *only = shadow.STRATEGIES.get(name) or (("own signal",), f"{shadow.SIGNALS[name]}h", False, "own")
         run, curve = 0.0, []
         for h in closed:
             run += h["pnl"]
             curve.append(round(run, 2))
         out.append({"name": name, "open": n_open, "tiers": [t or "unscored" for t in tiers], "exit": exits.get(e) or f"hold {e}",
-                    "filter": {"with": "with BTC's week", "against": "against BTC's week", "weekdays": "weekdays only", "shorts": "shorts only"}.get(
+                    "filter": {"with": "with BTC's week", "against": "against BTC's week", "weekdays": "weekdays only", "shorts": "shorts only", "own": "its own trades (no trader copied)"}.get(
                         only[0] if only else None, "scout finds only" if scout_only else "any market"),
                     "win": sum(h["pnl"] > 0 for h in closed) / len(closed) if closed else None,
                     "curve": curve[-150:], "last": closed[-1] if closed else None, "promoted": name in S["promoted"],
@@ -550,7 +552,10 @@ def practice(new=(), full=False):
         if new:
             shadow.open_new(new, {a for a, _, _ in crypto_copier.watchlist()})
         holdings = json.loads(crypto_copier.STATE_FILE.read_text()) if full and crypto_copier.STATE_FILE.exists() else None
-        shadow.update(crypto_copier.hl({"type": "allMids"}), holdings)
+        mids = crypto_copier.hl({"type": "allMids"})
+        if full:  # once per check: the own-trade books open what their signals say (funding, open interest, news)
+            shadow.open_signals(signals.entries(), mids)
+        shadow.update(mids, holdings)
     except Exception:
         traceback.print_exc()
 

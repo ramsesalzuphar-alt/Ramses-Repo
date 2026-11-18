@@ -6,6 +6,7 @@ Every version closes when the trader closes, or by its exit rule. Writes shadow.
 import json, os
 from datetime import datetime, timedelta
 import crypto_copier as cc
+from signals import SIGNALS  # own-trade books: they pick their trades themselves (signals.py)
 
 FILE = cc.HERE / "shadow.json"
 SIZE = 100.0
@@ -56,7 +57,7 @@ def load():
         book = json.loads(FILE.read_text())
     except (OSError, json.JSONDecodeError):
         book = {}
-    return {name: book.get(name) or {"open": {}, "closed": []} for name in STRATEGIES}
+    return {name: book.get(name) or {"open": {}, "closed": []} for name in {**STRATEGIES, **SIGNALS}}
 
 
 def save(book):
@@ -80,6 +81,19 @@ def open_new(items, scouted, now=None):
                                        "opened": now.isoformat(timespec="seconds"), "score": x["score"],
                                        "exit": cc.scout_exit(x["addr"]) if learned in (True, "tp") else None, "quick": quick(name),
                                        "hold": hold_of(name)}
+    save(book)
+
+
+def open_signals(entries, mids, now=None):
+    """Own-trade books open what their signal says ([(book, coin, side)]), at the current price, one per coin and side,
+    held their book's fixed hours (no exit rule, no trader to follow)."""
+    now = now or datetime.now()
+    book = load()
+    for name, coin, side in entries:
+        key = f"own:{coin}:{side}"
+        if name in SIGNALS and coin in mids and key not in book[name]["open"]:
+            book[name]["open"][key] = {"addr": "own", "coin": coin, "side": side, "entry": float(mids[coin]),
+                                       "opened": now.isoformat(timespec="seconds"), "score": None, "exit": None, "hold": SIGNALS[name]}
     save(book)
 
 
