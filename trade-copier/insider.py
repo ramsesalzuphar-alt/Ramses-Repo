@@ -194,11 +194,14 @@ def live(log=print):
         if acc in done:
             continue
         done.add(acc)
-        seen["filings"].append(acc)
         try:
             out += parse_filing(get(link + ".txt").decode("utf-8", "replace"), filed)
-        except (urllib.error.URLError, ET.ParseError, TimeoutError, ConnectionError) as e:
+        except ET.ParseError as e:  # a broken filing stays broken: don't retry it
             log(f"Couldn't read insider filing {acc}: {e}")
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:  # SEC hiccup: not marked seen, retried next check
+            log(f"Couldn't read insider filing {acc} ({e}); will retry")
+            continue
+        seen["filings"].append(acc)
     out = [t for t in out if tradable(t["Ticker"])]
     cutoff = (date.today() - timedelta(days=CLUSTER_DAYS + 5)).isoformat()
     recent = [r for r in seen["recent"] if r[0] >= cutoff]

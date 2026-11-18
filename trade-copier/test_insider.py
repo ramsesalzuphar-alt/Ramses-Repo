@@ -70,3 +70,27 @@ assert "not bought again" in copier.decide_pelosi({**_buy, "trade": {**_buy["tra
 assert copier.decide_pelosi(_buy).startswith("Done") and len(_placed) == 2
 print("buy-once tests pass")
 assert not insider.tradable("NONE") and insider.tradable("NOW")
+
+# live feed: a filing the SEC fails to serve (e.g. 502) is retried next check, not lost; one that read fine isn't re-read
+import json, tempfile, pathlib, urllib.error
+insider.SEEN_FILE = pathlib.Path(tempfile.mkdtemp()) / "insider_seen.json"
+entry = lambda n: f'href="https://www.sec.gov/Archives/edgar/data/1/2/000-26-00000{n}-index.htm" x Filed:&lt;/b&gt; 2026-11-18'
+feed = (" ".join(entry(n) for n in (1, 2))).encode()
+calls = []
+def fake_get(url, fail=True):
+    calls.append(url)
+    if "browse-edgar" in url:
+        return feed
+    if "00001" in url and fail:
+        raise urllib.error.HTTPError(url, 502, "Bad Gateway", None, None)
+    return b""
+logs = []
+insider.get = fake_get
+insider.live(logs.append)
+assert any("will retry" in l for l in logs), logs
+seen = json.loads(insider.SEEN_FILE.read_text())["filings"]
+assert seen == ["000-26-000002"], seen                      # the failed one isn't marked seen
+calls.clear(); insider.get = lambda url: fake_get(url, fail=False)
+insider.live(logs.append)
+assert [c for c in calls if "browse" not in c] == ["https://www.sec.gov/Archives/edgar/data/1/2/000-26-000001.txt"], calls  # retried, the other not re-read
+print("insider retry tests pass")
