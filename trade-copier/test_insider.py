@@ -74,7 +74,8 @@ assert not insider.tradable("NONE") and insider.tradable("NOW")
 # live feed: a filing the SEC fails to serve (e.g. 502) is retried next check, not lost; one that read fine isn't re-read
 import json, tempfile, pathlib, urllib.error
 insider.SEEN_FILE = pathlib.Path(tempfile.mkdtemp()) / "insider_seen.json"
-entry = lambda n: f'href="https://www.sec.gov/Archives/edgar/data/1/2/000-26-00000{n}-index.htm" x Filed:&lt;/b&gt; 2026-11-18'
+from datetime import date as _date
+entry = lambda n: f'href="https://www.sec.gov/Archives/edgar/data/1/2/000-26-00000{n}-index.htm" x Filed:&lt;/b&gt; {_date.today()}'
 feed = (" ".join(entry(n) for n in (1, 2))).encode()
 calls = []
 def fake_get(url, fail=True):
@@ -93,4 +94,13 @@ assert seen == ["000-26-000002"], seen                      # the failed one isn
 calls.clear(); insider.get = lambda url: fake_get(url, fail=False)
 insider.live(logs.append)
 assert [c for c in calls if "browse" not in c] == ["https://www.sec.gov/Archives/edgar/data/1/2/000-26-000001.txt"], calls  # retried, the other not re-read
+# a failed filing is still retried after it drops out of the latest-100 feed
+insider.SEEN_FILE.unlink()
+insider.get = fake_get
+insider.live(logs.append)                                   # filing 1 fails, 2 is read
+feed = entry(3).encode()                                    # the feed has moved on: 1 is no longer listed
+calls.clear(); insider.get = lambda url: fake_get(url, fail=False)
+insider.live(logs.append)
+assert sorted(c.rsplit("/", 1)[1] for c in calls if "browse" not in c) == ["000-26-000001.txt", "000-26-000003.txt"], calls
+assert json.loads(insider.SEEN_FILE.read_text())["retry"] == []
 print("insider retry tests pass")

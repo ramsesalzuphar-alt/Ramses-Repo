@@ -189,7 +189,11 @@ def live(log=print):
     done = set(seen["filings"])
     feed = get("https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&count=100&output=atom").decode("latin-1")
     out = []
-    for link, filed in re.findall(r'href="(https://www\.sec\.gov/Archives/edgar/data/\d+/\d+/[\d-]+)-index\.htm".*?Filed:&lt;/b&gt; (\d{4}-\d\d-\d\d)', feed, re.S):
+    # filings the SEC failed to serve earlier are retried even after they drop out of the latest-100 feed (busy afternoons)
+    retry = [tuple(r) for r in seen.get("retry", [])]
+    listed = re.findall(r'href="(https://www\.sec\.gov/Archives/edgar/data/\d+/\d+/[\d-]+)-index\.htm".*?Filed:&lt;/b&gt; (\d{4}-\d\d-\d\d)', feed, re.S)
+    seen["retry"] = []
+    for link, filed in dict.fromkeys(retry + listed):
         acc = link.rsplit("/", 1)[1]
         if acc in done:
             continue
@@ -198,8 +202,10 @@ def live(log=print):
             out += parse_filing(get(link + ".txt").decode("utf-8", "replace"), filed)
         except ET.ParseError as e:  # a broken filing stays broken: don't retry it
             log(f"Couldn't read insider filing {acc}: {e}")
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:  # SEC hiccup: not marked seen, retried next check
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:  # SEC hiccup: retried next check
             log(f"Couldn't read insider filing {acc} ({e}); will retry")
+            if date.today() - date.fromisoformat(filed) <= timedelta(days=3):  # past 3 days it would expire unseen anyway
+                seen["retry"].append([link, filed])
             continue
         seen["filings"].append(acc)
     out = [t for t in out if tradable(t["Ticker"])]
